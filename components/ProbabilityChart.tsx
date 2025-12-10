@@ -29,7 +29,7 @@ const ProbabilityChart: React.FC<ProbabilityChartProps> = ({ history, optimalSte
           <XAxis 
             dataKey="step" 
             type="number"
-            domain={[0, optimalSteps > 0 ? optimalSteps : 'auto']}
+            domain={[0, 'auto']}
             allowDecimals={false}
             tick={{ fill: '#94a3b8', fontSize: 10 }} 
             label={{ value: 'Iterations', position: 'insideBottomRight', fill: '#94a3b8', fontSize: 10, offset: -5 }}

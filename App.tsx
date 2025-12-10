@@ -8,7 +8,8 @@ import {
   Cpu,
   ArrowRight,
   Pause,
-  Zap
+  Zap,
+  AlertTriangle
 } from 'lucide-react';
 import StateChart from './components/StateChart';
 import ProbabilityChart from './components/ProbabilityChart';
@@ -37,7 +38,8 @@ const App: React.FC = () => {
   const [isRunning, setIsRunning] = useState<boolean>(false);
 
   const optimalIterations = getOptimalIterations(numQubits);
-  const isFinished = stepCount >= optimalIterations && subStep === 'ORACLE';
+  const isAtOptimal = stepCount === optimalIterations && subStep === 'ORACLE';
+  const isOverRotated = stepCount > optimalIterations;
 
   // Initialize on load or reset
   const handleReset = useCallback(() => {
@@ -94,11 +96,6 @@ const App: React.FC = () => {
   const executeStep = useCallback(() => {
     if (targetIndex === null) return;
     
-    // Prevent execution if we have reached optimal iterations
-    // We check stepCount >= optimalIterations. 
-    // If subStep is ORACLE, it means we are at the start of a new iteration loop (which we shouldn't start).
-    if (stepCount >= optimalIterations && subStep === 'ORACLE') return;
-
     setStates(prevStates => {
       if (subStep === 'ORACLE') {
         return applyOracle(prevStates, targetIndex);
@@ -114,19 +111,20 @@ const App: React.FC = () => {
       setStepCount(prev => prev + 1);
     }
     setPhase(AlgorithmPhase.RUNNING);
-  }, [targetIndex, subStep, stepCount, optimalIterations]);
+  }, [targetIndex, subStep]);
 
   // Effect to update history whenever states change during running phase
-  // Note: We only update history when a full iteration completes (stepCount increases)
-  // because probability only changes significantly after Diffusion.
   useEffect(() => {
     if (phase === AlgorithmPhase.RUNNING && targetIndex !== null) {
       const probTarget = states[targetIndex].probability;
       const probOthers = (1 - probTarget) / (states.length - 1);
 
       setHistory(prev => {
-        // If stepCount matches the last entry, we are likely in the middle of an iteration (Post-Oracle)
-        // or just updated. We only want one entry per Iteration index.
+        // Only add to history if we finished a full iteration (after Diffusion)
+        // or if we are tracking sub-steps (though conventionally probability is plotted per full iteration)
+        // Here we track history by stepCount.
+        
+        // We only push to history if the last entry isn't the current step count
         if (prev.length > 0 && prev[prev.length - 1].step === stepCount) return prev;
         return [...prev, { step: stepCount, probTarget, probOthers }];
       });
@@ -137,7 +135,7 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!isRunning) return;
 
-    // Stop condition: strictly stop at optimal iterations
+    // Auto-stop condition: Stop exactly at optimal iterations
     if (stepCount >= optimalIterations && subStep === 'ORACLE') {
       setIsRunning(false);
       return;
@@ -279,7 +277,8 @@ const App: React.FC = () => {
                   {!isRunning ? (
                      <button 
                       onClick={handleRun}
-                      disabled={targetIndex === null || isFinished}
+                      // Run is disabled if over-rotated or at optimal, forcing user to use "Step" to go beyond or Reset
+                      disabled={targetIndex === null || isOverRotated || isAtOptimal}
                       className="bg-quantum-success/90 hover:bg-quantum-success text-white py-2 rounded-lg font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     >
                       <Play className="w-4 h-4" /> Run
@@ -295,7 +294,7 @@ const App: React.FC = () => {
                  
                   <button 
                     onClick={handleStep}
-                    disabled={targetIndex === null || isRunning || isFinished}
+                    disabled={targetIndex === null || isRunning}
                     className="bg-quantum-700 hover:bg-quantum-600 text-white py-2 rounded-lg font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                   >
                     <SkipForward className="w-4 h-4" /> Step
@@ -314,16 +313,21 @@ const App: React.FC = () => {
             <div className="mt-6 p-4 bg-black/30 rounded border border-quantum-700 font-mono text-xs text-gray-400 space-y-2">
               <div className="flex justify-between border-b border-gray-800 pb-1">
                 <span className="text-gray-500">Iterations:</span>
-                <span className="text-white">{stepCount} <span className="text-gray-600">/ {optimalIterations}</span></span>
+                <span className={isOverRotated ? 'text-red-400 font-bold' : 'text-white'}>
+                  {stepCount} <span className="text-gray-600">/ {optimalIterations}</span>
+                </span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-gray-500">Next Action:</span>
-                {isFinished ? (
-                   <span className="text-quantum-success font-bold">FINISHED</span>
+                <span className="text-gray-500">Status:</span>
+                {isAtOptimal ? (
+                   <span className="text-quantum-success font-bold flex items-center gap-1">Optimal Reached</span>
+                ) : isOverRotated ? (
+                   <span className="text-red-400 font-bold flex items-center gap-1">
+                     <AlertTriangle className="w-3 h-3" /> Over-rotating
+                   </span>
                 ) : (
                     <span className="text-quantum-accent flex items-center gap-1">
-                        {subStep === 'ORACLE' ? 'Phase Flip (Oracle)' : 'Diffusion'}
-                        <ArrowRight className="w-3 h-3" />
+                        {subStep === 'ORACLE' ? 'Next: Oracle' : 'Next: Diffusion'}
                     </span>
                 )}
               </div>
@@ -387,9 +391,14 @@ const App: React.FC = () => {
                 <strong className="text-quantum-accent">Diffusion (Inversion about Mean):</strong> 
                 Amplifies the state with negative phase (target) while suppressing others. Probability flows into target.
               </p>
-              {isFinished && (
+              {isAtOptimal && (
                   <p className="pt-2 text-quantum-success border-t border-gray-700 mt-2">
-                      <strong>Optimal Iterations Reached!</strong> The target probability should now be near maximal. Further iterations would over-rotate and reduce accuracy.
+                      <strong>Optimal Iterations Reached!</strong> The target probability is near its peak. You can continue stepping to observe probability decrease (over-rotation).
+                  </p>
+              )}
+               {isOverRotated && (
+                  <p className="pt-2 text-red-400 border-t border-gray-700 mt-2">
+                      <strong>Over-rotation Detected:</strong> You have exceeded the optimal iterations. The probability amplitude is rotating away from the target state, reducing accuracy.
                   </p>
               )}
             </div>
