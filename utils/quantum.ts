@@ -25,10 +25,12 @@ const normalizeState = (states: QuantumState[]): QuantumState[] => {
   
   return states.map(s => {
     const newAmp = s.amplitude * normalizationFactor;
+    // Ensure probability is strictly non-negative
+    const prob = Math.max(0, newAmp * newAmp);
     return {
       ...s,
       amplitude: newAmp,
-      probability: newAmp * newAmp,
+      probability: prob,
       phase: newAmp >= 0 ? 0 : 180
     };
   });
@@ -77,11 +79,12 @@ export const applyHadamard = (currentState: QuantumState[]): QuantumState[] => {
     }
 
     newAmplitude /= sqrtN;
+    const prob = Math.max(0, newAmplitude * newAmplitude);
 
     return {
       ...targetState,
       amplitude: newAmplitude,
-      probability: newAmplitude * newAmplitude,
+      probability: prob,
       phase: newAmplitude >= 0 ? 0 : 180
     };
   });
@@ -90,16 +93,16 @@ export const applyHadamard = (currentState: QuantumState[]): QuantumState[] => {
 };
 
 /**
- * Applies the Oracle operator (flips phase of target state)
+ * Applies the Oracle operator (flips phase of ALL target states)
  */
-export const applyOracle = (currentState: QuantumState[], targetIndex: number): QuantumState[] => {
+export const applyOracle = (currentState: QuantumState[], targetIndices: number[]): QuantumState[] => {
   const next = currentState.map(s => {
-    if (s.index === targetIndex) {
+    if (targetIndices.includes(s.index)) {
       const newAmp = -s.amplitude;
       return {
         ...s,
         amplitude: newAmp,
-        probability: newAmp * newAmp,
+        probability: Math.max(0, newAmp * newAmp),
         phase: newAmp >= 0 ? 0 : 180
       };
     }
@@ -121,10 +124,11 @@ export const applyDiffusion = (currentState: QuantumState[]): QuantumState[] => 
   const next = currentState.map(s => {
     // formula: 2*mean - amplitude
     const newAmp = (2 * mean) - s.amplitude;
+    const prob = Math.max(0, newAmp * newAmp);
     return {
       ...s,
       amplitude: newAmp,
-      probability: newAmp * newAmp, 
+      probability: prob, 
       phase: newAmp >= 0 ? 0 : 180
     };
   });
@@ -132,10 +136,40 @@ export const applyDiffusion = (currentState: QuantumState[]): QuantumState[] => 
 };
 
 /**
- * Helper to calculate optimal iterations: Floor((PI/4) * sqrt(N))
- * This ensures we don't over-rotate.
+ * Determines the optimal number of iterations by simulating the algorithm.
+ * It tries at least 10 iterations (or more depending on N) and picks the one 
+ * where target probability is maximized.
  */
-export const getOptimalIterations = (numQubits: number): number => {
+export const findOptimalIterations = (numQubits: number, targetIndices: number[]): number => {
+  if (targetIndices.length === 0) return 0;
+  
+  // Simulation limit: At least 10, or enough to cover the theoretical period
   const N = Math.pow(2, numQubits);
-  return Math.floor((Math.PI / 4) * Math.sqrt(N));
+  const theoretical = (Math.PI / 4) * Math.sqrt(N / targetIndices.length);
+  const limit = Math.max(10, Math.ceil(theoretical * 2)); 
+
+  let currentState = initializeState(numQubits, 0); // Start with standard |0...0>
+  currentState = applyHadamard(currentState); // H^n
+
+  let maxProb = 0;
+  let optimalStep = 0;
+
+  for (let step = 1; step <= limit; step++) {
+    // Apply Oracle
+    currentState = applyOracle(currentState, targetIndices);
+    // Apply Diffusion
+    currentState = applyDiffusion(currentState);
+    
+    // Calculate total probability of finding ANY target state
+    const currentProb = currentState.reduce((sum, s) => 
+      targetIndices.includes(s.index) ? sum + s.probability : sum, 0
+    );
+
+    if (currentProb > maxProb) {
+      maxProb = currentProb;
+      optimalStep = step;
+    }
+  }
+
+  return optimalStep;
 };

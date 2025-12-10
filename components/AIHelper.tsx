@@ -6,7 +6,7 @@ import { Sparkles, Loader2 } from 'lucide-react';
 interface AIHelperProps {
   stepIndex: number;
   numQubits: number;
-  targetIndex: number;
+  targetIndices: number[];
   currentProbability: number;
   history: StepHistory[];
 }
@@ -14,7 +14,7 @@ interface AIHelperProps {
 const AIHelper: React.FC<AIHelperProps> = ({ 
   stepIndex, 
   numQubits, 
-  targetIndex, 
+  targetIndices, 
   currentProbability, 
   history 
 }) => {
@@ -24,7 +24,7 @@ const AIHelper: React.FC<AIHelperProps> = ({
   const handleAskAI = async () => {
     setLoading(true);
     try {
-      const text = await explainQuantumState(stepIndex, numQubits, targetIndex, currentProbability, history);
+      const text = await explainQuantumState(stepIndex, numQubits, targetIndices, currentProbability, history);
       setExplanation(text);
     } finally {
       setLoading(false);

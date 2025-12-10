@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Play, 
   SkipForward, 
@@ -13,13 +13,12 @@ import {
 } from 'lucide-react';
 import StateChart from './components/StateChart';
 import ProbabilityChart from './components/ProbabilityChart';
-import AIHelper from './components/AIHelper';
 import { 
   initializeState, 
   applyHadamard, 
   applyOracle, 
   applyDiffusion, 
-  getOptimalIterations 
+  findOptimalIterations 
 } from './utils/quantum';
 import { QuantumState, AlgorithmPhase, StepHistory } from './types';
 
@@ -27,7 +26,7 @@ const App: React.FC = () => {
   // --- Config State ---
   const [numQubits, setNumQubits] = useState<number>(4);
   const [initialStateIndex, setInitialStateIndex] = useState<number>(0);
-  const [targetIndex, setTargetIndex] = useState<number | null>(null);
+  const [targetIndices, setTargetIndices] = useState<number[]>([]);
   
   // --- Runtime State ---
   const [states, setStates] = useState<QuantumState[]>([]);
@@ -37,9 +36,23 @@ const App: React.FC = () => {
   const [history, setHistory] = useState<StepHistory[]>([]);
   const [isRunning, setIsRunning] = useState<boolean>(false);
 
-  const optimalIterations = getOptimalIterations(numQubits);
+  // Use simulation to find optimal iterations based on current selection
+  const optimalIterations = findOptimalIterations(numQubits, targetIndices);
+
   const isAtOptimal = stepCount === optimalIterations && subStep === 'ORACLE';
   const isOverRotated = stepCount > optimalIterations;
+
+  // --- Derived Statistics ---
+  // Mean Amplitude: The axis of inversion for diffusion (sum of amplitudes / N)
+  // This is often what users intuitively look for when seeing "average" on an amplitude chart.
+  const meanAmplitude = states.length > 0 
+    ? states.reduce((sum, s) => sum + s.amplitude, 0) / states.length 
+    : 0;
+  
+  // Total Probability of all selected targets
+  const totalTargetProbability = states.reduce((sum, s) => 
+    targetIndices.includes(s.index) ? sum + s.probability : sum, 0
+  );
 
   // Initialize on load or reset
   const handleReset = useCallback(() => {
@@ -59,7 +72,7 @@ const App: React.FC = () => {
     setSubStep('ORACLE');
     
     setHistory([{ step: 0, probTarget: 0, probOthers: 1 }]); 
-    setTargetIndex(null);
+    setTargetIndices([]);
   }, [numQubits, initialStateIndex]);
 
   // Handle Qubit or Initial State Change
@@ -74,31 +87,42 @@ const App: React.FC = () => {
     setStates(newStates);
     setPhase(AlgorithmPhase.SUPERPOSITION);
     
-    // Recalculate history based on current target (if any)
-    const probT = targetIndex !== null ? newStates[targetIndex].probability : 0;
-    const probO = targetIndex !== null 
-      ? (1 - probT) / (newStates.length - 1) 
-      : 1 / newStates.length;
+    // Initial history after Hadamard
+    const probT = 0; 
+    const probO = 1 / newStates.length;
       
     setHistory([{ step: 0, probTarget: probT, probOthers: probO }]);
   };
 
   const handleSelectTarget = (index: number) => {
     if (phase !== AlgorithmPhase.SUPERPOSITION) return;
-    setTargetIndex(index);
     
-    const currentProb = states[index].probability;
-    const othersProb = (1 - currentProb) / (states.length - 1);
+    // Toggle logic
+    let newIndices = targetIndices.includes(index) 
+        ? targetIndices.filter(i => i !== index)
+        : [...targetIndices, index];
+        
+    setTargetIndices(newIndices);
     
-    setHistory([{ step: 0, probTarget: currentProb, probOthers: othersProb }]);
+    // Calculate new probabilities based on the selection using *current* states
+    // Note: States don't change, but what we consider "Target Probability" does.
+    const currentTotalTargetProb = states.reduce((sum, s) => newIndices.includes(s.index) ? sum + s.probability : sum, 0);
+    
+    // Avg prob of non-targets
+    const numNonTargets = states.length - newIndices.length;
+    const currentProbOthers = numNonTargets > 0 
+        ? (1 - currentTotalTargetProb) / numNonTargets
+        : 0;
+    
+    setHistory([{ step: 0, probTarget: currentTotalTargetProb, probOthers: currentProbOthers }]);
   };
 
   const executeStep = useCallback(() => {
-    if (targetIndex === null) return;
+    if (targetIndices.length === 0) return;
     
     setStates(prevStates => {
       if (subStep === 'ORACLE') {
-        return applyOracle(prevStates, targetIndex);
+        return applyOracle(prevStates, targetIndices);
       } else {
         return applyDiffusion(prevStates);
       }
@@ -111,25 +135,23 @@ const App: React.FC = () => {
       setStepCount(prev => prev + 1);
     }
     setPhase(AlgorithmPhase.RUNNING);
-  }, [targetIndex, subStep]);
+  }, [targetIndices, subStep]);
 
   // Effect to update history whenever states change during running phase
   useEffect(() => {
-    if (phase === AlgorithmPhase.RUNNING && targetIndex !== null) {
-      const probTarget = states[targetIndex].probability;
-      const probOthers = (1 - probTarget) / (states.length - 1);
+    if (phase === AlgorithmPhase.RUNNING && targetIndices.length > 0) {
+      
+      const probTarget = states.reduce((sum, s) => targetIndices.includes(s.index) ? sum + s.probability : sum, 0);
+      const numNonTargets = states.length - targetIndices.length;
+      const probOthers = numNonTargets > 0 ? (1 - probTarget) / numNonTargets : 0;
 
       setHistory(prev => {
-        // Only add to history if we finished a full iteration (after Diffusion)
-        // or if we are tracking sub-steps (though conventionally probability is plotted per full iteration)
-        // Here we track history by stepCount.
-        
-        // We only push to history if the last entry isn't the current step count
+        // Only push to history if the last entry isn't the current step count
         if (prev.length > 0 && prev[prev.length - 1].step === stepCount) return prev;
         return [...prev, { step: stepCount, probTarget, probOthers }];
       });
     }
-  }, [states, stepCount, phase, targetIndex]);
+  }, [states, stepCount, phase, targetIndices]);
 
   // Run Loop Manager
   useEffect(() => {
@@ -154,7 +176,7 @@ const App: React.FC = () => {
   };
 
   const handleRun = () => {
-    if (targetIndex === null) return;
+    if (targetIndices.length === 0) return;
     setIsRunning(true);
   };
 
@@ -243,14 +265,24 @@ const App: React.FC = () => {
               {/* Target State Info */}
               <div className="pt-4 border-t border-quantum-700">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm text-gray-400">Target State</span>
-                  <span className={`text-xs font-mono px-2 py-1 rounded ${targetIndex !== null ? 'bg-quantum-purple/20 text-quantum-purple' : 'bg-gray-800 text-gray-500'}`}>
-                    {targetIndex !== null ? `|${targetIndex.toString(2).padStart(numQubits, '0')}⟩` : 'None Selected'}
-                  </span>
+                  <span className="text-sm text-gray-400">Target States</span>
+                  <div className="flex flex-wrap gap-1">
+                      {targetIndices.length > 0 ? (
+                          targetIndices.map(idx => (
+                            <span key={idx} className="text-xs font-mono px-2 py-1 rounded bg-quantum-purple/20 text-quantum-purple border border-quantum-purple/30">
+                                |{idx.toString(2).padStart(numQubits, '0')}⟩
+                            </span>
+                          ))
+                      ) : (
+                        <span className="text-xs font-mono px-2 py-1 rounded bg-gray-800 text-gray-500">None Selected</span>
+                      )}
+                  </div>
                 </div>
                 {phase === AlgorithmPhase.SUPERPOSITION && (
-                  <p className={`text-xs mt-2 ${targetIndex === null ? 'text-quantum-accent animate-pulse' : 'text-gray-500'}`}>
-                    {targetIndex === null ? 'Click a bar in the chart to select the target' : 'Click another bar to change target'}
+                  <p className={`text-xs mt-2 ${targetIndices.length === 0 ? 'text-quantum-accent animate-pulse' : 'text-gray-500'}`}>
+                    {targetIndices.length === 0 
+                        ? 'Click a bar in the chart to select a target' 
+                        : 'Click other bars to select multiple, or click again to deselect.'}
                   </p>
                 )}
               </div>
@@ -278,7 +310,7 @@ const App: React.FC = () => {
                      <button 
                       onClick={handleRun}
                       // Run is disabled if over-rotated or at optimal, forcing user to use "Step" to go beyond or Reset
-                      disabled={targetIndex === null || isOverRotated || isAtOptimal}
+                      disabled={targetIndices.length === 0 || isOverRotated || isAtOptimal}
                       className="bg-quantum-success/90 hover:bg-quantum-success text-white py-2 rounded-lg font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     >
                       <Play className="w-4 h-4" /> Run
@@ -294,7 +326,7 @@ const App: React.FC = () => {
                  
                   <button 
                     onClick={handleStep}
-                    disabled={targetIndex === null || isRunning}
+                    disabled={targetIndices.length === 0 || isRunning}
                     className="bg-quantum-700 hover:bg-quantum-600 text-white py-2 rounded-lg font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                   >
                     <SkipForward className="w-4 h-4" /> Step
@@ -334,16 +366,6 @@ const App: React.FC = () => {
             </div>
           </div>
           
-          {targetIndex !== null && (
-            <AIHelper 
-              stepIndex={stepCount}
-              numQubits={numQubits}
-              targetIndex={targetIndex}
-              currentProbability={states[targetIndex].probability}
-              history={history}
-            />
-          )}
-
         </div>
 
         {/* Right Column: Visualization */}
@@ -353,9 +375,11 @@ const App: React.FC = () => {
           <div className="space-y-2">
             <StateChart 
               data={states} 
-              targetIndex={targetIndex}
+              targetIndices={targetIndices}
               selectable={phase === AlgorithmPhase.SUPERPOSITION}
               onBarClick={handleSelectTarget}
+              meanAmplitude={meanAmplitude}
+              showMean={subStep === 'ORACLE' || subStep === 'DIFFUSION'}
             />
              <div className="flex justify-between text-xs text-gray-500 px-2">
               <div className="flex items-center gap-2">
@@ -364,7 +388,7 @@ const App: React.FC = () => {
               </div>
               <div>
                 {subStep === 'DIFFUSION' && phase === AlgorithmPhase.RUNNING 
-                    ? <span className="text-pink-400 animate-pulse">Oracle applied. Target phase flipped. Ready for Diffusion.</span> 
+                    ? <span className="text-pink-400 animate-pulse">Oracle applied. Target phases flipped. Ready for Diffusion.</span> 
                     : "Amplitude Visualization"
                 }
               </div>
@@ -382,23 +406,37 @@ const App: React.FC = () => {
               <Target className="w-4 h-4" />
               Algorithm Logic
             </h3>
+            
+            {/* Stats Panel */}
+            <div className="grid grid-cols-2 gap-3 mb-4 p-3 bg-black/20 rounded border border-quantum-800">
+               <div className="col-span-2">
+                 <span className="text-[10px] uppercase text-gray-500 font-bold tracking-wider block">Mean Amplitude</span>
+                 <span className="font-mono text-amber-400 text-sm">{meanAmplitude.toFixed(4)}</span>
+               </div>
+            </div>
+
             <div className="text-sm text-gray-400 space-y-2">
               <p className={subStep === 'ORACLE' && phase === AlgorithmPhase.RUNNING ? 'text-gray-600 transition-colors' : 'text-gray-300'}>
                 <strong className="text-quantum-accent">Oracle (Phase Flip):</strong> 
-                Identifies target state |w⟩ and flips its phase. Amplitudes become negative but probability magnitude remains unchanged.
+                Identifies target states ({targetIndices.length}) and flips their phases. Amplitudes become negative but probability magnitude remains unchanged.
               </p>
               <p className={subStep === 'DIFFUSION' && phase === AlgorithmPhase.RUNNING ? 'text-gray-600 transition-colors' : 'text-gray-300'}>
-                <strong className="text-quantum-accent">Diffusion (Inversion about Mean):</strong> 
-                Amplifies the state with negative phase (target) while suppressing others. Probability flows into target.
+                <strong className="text-quantum-accent">Diffusion (Amplitude Amplification):</strong> 
+                Reflects all amplitudes around the Mean Amplitude. This operation boosts the amplitude of target states (which are currently negative) while diminishing non-target states.
               </p>
+              
+               <div className="mt-3 p-2 bg-yellow-900/20 border border-yellow-700/50 rounded text-xs text-yellow-200">
+                  <strong>Note:</strong> The bars in the chart represent <em>Amplitude</em>, which can be negative (Phase). Probability is Amplitude squared (always positive).
+               </div>
+
               {isAtOptimal && (
                   <p className="pt-2 text-quantum-success border-t border-gray-700 mt-2">
-                      <strong>Optimal Iterations Reached!</strong> The target probability is near its peak. You can continue stepping to observe probability decrease (over-rotation).
+                      <strong>Optimal Iterations Reached!</strong> The total target probability is at its peak based on simulation.
                   </p>
               )}
                {isOverRotated && (
                   <p className="pt-2 text-red-400 border-t border-gray-700 mt-2">
-                      <strong>Over-rotation Detected:</strong> You have exceeded the optimal iterations. The probability amplitude is rotating away from the target state, reducing accuracy.
+                      <strong>Over-rotation Detected:</strong> You have exceeded the optimal iterations. The probability amplitude is rotating away from the target states.
                   </p>
               )}
             </div>
