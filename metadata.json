@@ -1,0 +1,5 @@
+{
+  "name": "Quantum Grover Visualizer",
+  "description": "An interactive visualization of Grover's Search Algorithm. Users can define qubit counts, observe quantum state evolution (amplitude phases and probabilities), and analyze the algorithm's performance step-by-step with AI-powered insights.",
+  "requestFramePermissions": []
+}
