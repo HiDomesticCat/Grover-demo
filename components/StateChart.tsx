@@ -1,12 +1,12 @@
 import React from 'react';
-import { 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer, 
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
   Cell,
   ReferenceLine,
   Label
@@ -22,13 +22,13 @@ interface StateChartProps {
   showMean?: boolean;
 }
 
-const StateChart: React.FC<StateChartProps> = ({ 
-  data, 
-  targetIndices, 
-  onBarClick, 
-  selectable, 
+const StateChart: React.FC<StateChartProps> = ({
+  data,
+  targetIndices,
+  onBarClick,
+  selectable,
   meanAmplitude,
-  showMean 
+  showMean
 }) => {
   // Custom tooltip to show detailed info
   const CustomTooltip = ({ active, payload, label }: any) => {
@@ -73,7 +73,7 @@ const StateChart: React.FC<StateChartProps> = ({
           </span>
         )}
       </div>
-      
+
       <div className="flex-1 w-full min-h-0">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
@@ -81,47 +81,47 @@ const StateChart: React.FC<StateChartProps> = ({
             margin={{ top: 10, right: 10, left: 10, bottom: 20 }}
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
-            <XAxis 
-              dataKey="binary" 
-              tick={{ fill: '#94a3b8', fontSize: 10, fontFamily: 'monospace' }} 
-              interval={0} 
+            <XAxis
+              dataKey="binary"
+              tick={{ fill: '#94a3b8', fontSize: 10, fontFamily: 'monospace' }}
+              interval={0}
             >
-               <Label value="Quantum States (Basis Vectors)" offset={0} position="insideBottom" fill="#64748b" style={{fontSize: '10px'}} />
+              <Label value="Quantum States (Basis Vectors)" offset={0} position="insideBottom" fill="#64748b" style={{ fontSize: '10px' }} />
             </XAxis>
-            <YAxis 
+            <YAxis
               tick={{ fill: '#94a3b8', fontSize: 10 }}
               domain={[-1, 1]}
             >
-               <Label 
-                  value="Amplitude (ψ)" 
-                  angle={-90} 
-                  position="insideLeft" 
-                  fill="#94a3b8" 
-                  style={{fontSize: '11px', fontWeight: 'bold'}} 
-                  offset={0}
-                />
+              <Label
+                value="Amplitude (ψ)"
+                angle={-90}
+                position="insideLeft"
+                fill="#94a3b8"
+                style={{ fontSize: '11px', fontWeight: 'bold' }}
+                offset={0}
+              />
             </YAxis>
             <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255, 255, 255, 0.05)' }} />
             <ReferenceLine y={0} stroke="#475569" strokeWidth={1} />
-            
+
             {/* Mean Amplitude Line - Left Sided */}
             {showMean && meanAmplitude !== undefined && (
-              <ReferenceLine 
-                y={meanAmplitude} 
-                stroke="#fbbf24" 
-                strokeDasharray="3 3" 
-                label={{ 
-                  position: 'insideLeft', 
-                  value: 'Mean Amp', 
-                  fill: '#fbbf24', 
+              <ReferenceLine
+                y={meanAmplitude}
+                stroke="#fbbf24"
+                strokeDasharray="3 3"
+                label={{
+                  position: 'insideLeft',
+                  value: 'Mean Amp',
+                  fill: '#fbbf24',
                   fontSize: 10,
                   offset: 10
-                }} 
+                }}
               />
             )}
 
-            <Bar 
-              dataKey="amplitude" 
+            <Bar
+              dataKey="amplitude"
               cursor={selectable ? "pointer" : "default"}
               onClick={(data) => {
                 if (selectable && onBarClick) onBarClick(data.index);
@@ -130,14 +130,14 @@ const StateChart: React.FC<StateChartProps> = ({
               {data.map((entry, index) => {
                 const isTarget = targetIndices.includes(index);
                 const isNegative = entry.amplitude < 0;
-                
+
                 let fill = isNegative ? '#f472b6' : '#22d3ee'; // Pink for neg, Cyan for pos
                 if (isTarget) fill = '#8b5cf6'; // Purple for target
-                
+
                 return (
-                  <Cell 
-                    key={`cell-${index}`} 
-                    fill={fill} 
+                  <Cell
+                    key={`cell-${index}`}
+                    fill={fill}
                     stroke={isTarget ? '#fff' : 'none'}
                     strokeWidth={isTarget ? 2 : 0}
                     className="transition-all duration-300 hover:opacity-80"

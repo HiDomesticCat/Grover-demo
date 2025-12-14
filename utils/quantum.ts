@@ -1,18 +1,6 @@
 import { QuantumState } from '../types';
 
 /**
- * Helper: Count set bits (population count) for dot product calculation
- */
-const countSetBits = (n: number): number => {
-  let count = 0;
-  while (n > 0) {
-    n &= (n - 1);
-    count++;
-  }
-  return count;
-};
-
-/**
  * Helper: Normalize state vector to ensure sum of probabilities is exactly 1
  * This prevents floating point drift over many iterations.
  */
@@ -20,9 +8,9 @@ const normalizeState = (states: QuantumState[]): QuantumState[] => {
   const totalProbability = states.reduce((sum, s) => sum + (s.amplitude * s.amplitude), 0);
   // If prob is 0 (impossible in quantum), return as is.
   if (totalProbability < 1e-15) return states;
-  
+
   const normalizationFactor = 1 / Math.sqrt(totalProbability);
-  
+
   return states.map(s => {
     const newAmp = s.amplitude * normalizationFactor;
     // Ensure probability is strictly non-negative
@@ -38,17 +26,19 @@ const normalizeState = (states: QuantumState[]): QuantumState[] => {
 
 /**
  * Initializes the quantum state.
- * Default is |0...0> (index 0), but can be set to any basis state.
+ * Default is index 0.
+ * For visualization of arbitrary N, we generate binary strings padded to ceil(log2(N)).
  */
-export const initializeState = (numQubits: number, initialIndex: number = 0): QuantumState[] => {
-  const numStates = Math.pow(2, numQubits);
+export const initializeState = (numStates: number, initialIndex: number = 0): QuantumState[] => {
   const states: QuantumState[] = [];
-  
+  // Calculate bits needed for display
+  const bitsNeeded = Math.ceil(Math.log2(numStates));
+
   for (let i = 0; i < numStates; i++) {
     const isInitial = i === initialIndex;
     states.push({
       index: i,
-      binary: i.toString(2).padStart(numQubits, '0'),
+      binary: i.toString(2).padStart(bitsNeeded, '0'),
       amplitude: isInitial ? 1 : 0,
       probability: isInitial ? 1 : 0,
       phase: 0
@@ -58,38 +48,23 @@ export const initializeState = (numQubits: number, initialIndex: number = 0): Qu
 };
 
 /**
- * Applies Hadamard transform.
- * Implements H^n |x> = (1/sqrt(N)) * sum_y (-1)^(x.y) |y>
+ * Creates a valid uniform superposition for arbitrary N.
+ * Sets every amplitude to 1/sqrt(N).
+ * This replaces "Apply Hadamard" because H^n is specific to 2^n states.
+ * For generalized N, we just start in the uniform state |s>.
  */
-export const applyHadamard = (currentState: QuantumState[]): QuantumState[] => {
+export const createSuperposition = (currentState: QuantumState[]): QuantumState[] => {
   const N = currentState.length;
-  const sqrtN = Math.sqrt(N);
-  
-  // Create a new array to avoid mutating in place during calculation
-  const transformed = currentState.map((targetState) => {
-    let newAmplitude = 0;
+  const uniformAmp = 1 / Math.sqrt(N);
+  const uniformProb = uniformAmp * uniformAmp;
 
-    for (const sourceState of currentState) {
-      if (Math.abs(sourceState.amplitude) < 1e-10) continue;
-
-      const dotProduct = countSetBits(targetState.index & sourceState.index);
-      const sign = dotProduct % 2 === 0 ? 1 : -1;
-
-      newAmplitude += (sign * sourceState.amplitude);
-    }
-
-    newAmplitude /= sqrtN;
-    const prob = Math.max(0, newAmplitude * newAmplitude);
-
-    return {
-      ...targetState,
-      amplitude: newAmplitude,
-      probability: prob,
-      phase: newAmplitude >= 0 ? 0 : 180
-    };
-  });
-  
-  return normalizeState(transformed);
+  // Return new array where every state has uniform amplitude
+  return currentState.map(s => ({
+    ...s,
+    amplitude: uniformAmp,
+    probability: uniformProb,
+    phase: 0
+  }));
 };
 
 /**
@@ -113,14 +88,15 @@ export const applyOracle = (currentState: QuantumState[], targetIndices: number[
 
 /**
  * Applies the Diffusion operator (Inversion about the mean)
- * 2|s><s| - I
+ * 2|s><s| - I  (where |s> is uniform superposition)
+ * For generalized Grover, this is Inversion about the Message (Average).
  */
 export const applyDiffusion = (currentState: QuantumState[]): QuantumState[] => {
   const N = currentState.length;
   // Calculate mean amplitude
   const sumAmplitudes = currentState.reduce((sum, s) => sum + s.amplitude, 0);
   const mean = sumAmplitudes / N;
-  
+
   const next = currentState.map(s => {
     // formula: 2*mean - amplitude
     const newAmp = (2 * mean) - s.amplitude;
@@ -128,7 +104,7 @@ export const applyDiffusion = (currentState: QuantumState[]): QuantumState[] => 
     return {
       ...s,
       amplitude: newAmp,
-      probability: prob, 
+      probability: prob,
       phase: newAmp >= 0 ? 0 : 180
     };
   });
@@ -137,19 +113,16 @@ export const applyDiffusion = (currentState: QuantumState[]): QuantumState[] => 
 
 /**
  * Determines the optimal number of iterations by simulating the algorithm.
- * It tries at least 10 iterations (or more depending on N) and picks the one 
- * where target probability is maximized.
  */
-export const findOptimalIterations = (numQubits: number, targetIndices: number[]): number => {
+export const findOptimalIterations = (numStates: number, targetIndices: number[]): number => {
   if (targetIndices.length === 0) return 0;
-  
-  // Simulation limit: At least 10, or enough to cover the theoretical period
-  const N = Math.pow(2, numQubits);
-  const theoretical = (Math.PI / 4) * Math.sqrt(N / targetIndices.length);
-  const limit = Math.max(10, Math.ceil(theoretical * 2)); 
 
-  let currentState = initializeState(numQubits, 0); // Start with standard |0...0>
-  currentState = applyHadamard(currentState); // H^n
+  // Theoretical optimal: (PI/4) * sqrt(N/M)
+  const theoretical = (Math.PI / 4) * Math.sqrt(numStates / targetIndices.length);
+  const limit = Math.max(10, Math.ceil(theoretical * 2));
+
+  let currentState = initializeState(numStates, 0);
+  currentState = createSuperposition(currentState);
 
   let maxProb = 0;
   let optimalStep = 0;
@@ -159,9 +132,9 @@ export const findOptimalIterations = (numQubits: number, targetIndices: number[]
     currentState = applyOracle(currentState, targetIndices);
     // Apply Diffusion
     currentState = applyDiffusion(currentState);
-    
+
     // Calculate total probability of finding ANY target state
-    const currentProb = currentState.reduce((sum, s) => 
+    const currentProb = currentState.reduce((sum, s) =>
       targetIndices.includes(s.index) ? sum + s.probability : sum, 0
     );
 
