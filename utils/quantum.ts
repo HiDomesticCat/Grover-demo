@@ -119,7 +119,7 @@ export const findOptimalIterations = (numStates: number, targetIndices: number[]
 
   // Theoretical optimal: (PI/4) * sqrt(N/M)
   const theoretical = (Math.PI / 4) * Math.sqrt(numStates / targetIndices.length);
-  const limit = Math.max(10, Math.ceil(theoretical * 2));
+  const limit = Math.max(20, Math.ceil(theoretical * 2));
 
   let currentState = initializeState(numStates, 0);
   currentState = createSuperposition(currentState);
