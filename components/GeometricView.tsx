@@ -61,6 +61,34 @@ const GeometricView: React.FC<GeometricViewProps> = ({ states, targetIndices }) 
     const cosThetaDiv2 = Math.sqrt((n - m) / n);
     const startX = cx + (cosThetaDiv2 * radius);
     const startY = cy - (sinThetaDiv2 * radius);
+	
+	//the following code is for showing the arc with degree in this components
+	//[start]
+	const angleRadian = Math.atan2(yVal, xVal);
+	const angleDegree = (angleRadian * 180) / Math.PI;
+	const finalAngle = Math.abs(angleDegree);
+	
+	const initAngleRadius = Math.atan2(sinThetaDiv2, cosThetaDiv2);
+	const arcRadius = 30;
+	
+	const getAnglePath = (angleRad: number, arcR: number) =>{
+		//starting point for arc
+		const startXArc = cx + arcR;
+		const startYArc = cy;
+		//ending point for arc
+		const endXArc = cx + arcR * Math.cos(angleRad);
+		const endYArc = cy - arcR * Math.sin(angleRad); //for SVG if Y is negative
+		
+		const overFLAGArc = 0;
+		const sweepFlag = angleRad >= 0 ? 0 : 1;
+		
+		/* inherit from Line 159: {`M ${cx + 30} ${cy} A 30 30 0 0 0 ${cx + 30 * Math.cos(-0.1)} ${cy + 30 * Math.sin(-0.1)}`}*/
+		return `M ${startXArc} ${startYArc} A ${arcR} ${arcR} 0 ${overFLAGArc} ${sweepFlag} ${endXArc} ${endYArc}`;
+		
+	}
+	//calculate the arc path
+	const initArcPath = getAnglePath(initAngleRadius, arcRadius);//for not running first stage
+	const currentArcPath = getAnglePath(angleRadian, arcRadius);//for running or in interation
 
     return (
         <div className="w-full bg-quantum-800/50 rounded-lg p-4 border border-quantum-700 flex flex-col">
@@ -79,6 +107,18 @@ const GeometricView: React.FC<GeometricViewProps> = ({ states, targetIndices }) 
                     {/* Labels */}
                     <text x={cx + axisLength + 10} y={cy + 4} fill="#94a3b8" fontSize="12" fontFamily="monospace">|s'⟩ (Non-Target)</text>
                     <text x={cx} y={cy - axisLength - 10} textAnchor="middle" fill="#a855f7" fontSize="12" fontFamily="monospace">|w⟩ (Target)</text>
+					
+					{/*showing angle next to the  target label*/}
+					<text 
+						x={cx + 50} 
+						y={cy - axisLength - 10} 
+						textAnchor="start" 
+						fill="#22d3ee"
+						fontSize="12" 
+						fontFamily="monospace"
+					>
+					{`(${finalAngle.toFixed(2)}°)`}
+					</text>
 
                     {/* Initial State Vector (Ghost) */}
                     <line
@@ -89,6 +129,15 @@ const GeometricView: React.FC<GeometricViewProps> = ({ states, targetIndices }) 
                         strokeDasharray="4 4"
                     />
                     <text x={startX + 5} y={startY - 5} fill="#64748b" fontSize="10" fontFamily="monospace">|s⟩</text>
+					
+					{/*showing first stage arc path*/}
+					<path
+                        d={initArcPath}
+                        fill="none"
+                        stroke="#475569"
+                        strokeWidth="1"
+                        opacity="0.5"
+                    />
 
                     {/* Main State Vector */}
                     <line
@@ -107,11 +156,17 @@ const GeometricView: React.FC<GeometricViewProps> = ({ states, targetIndices }) 
                     </defs>
 
                     {/* Angle Indicator (approximate) */}
+					{/* [Modified] showing dynamic arc changing stage*/}
                     <path
+						/*
                         d={`M ${cx + 30} ${cy} A 30 30 0 0 0 ${cx + 30 * Math.cos(-0.1)} ${cy + 30 * Math.sin(-0.1)}`} // Just a visual hint, tricky to make dynamic perfectly without complex math
+						
+						*[preserved]*
+						*/
+						d={currentArcPath}
                         fill="none"
                         stroke="#22d3ee"
-                        opacity="0.3"
+                        opacity="1"
                     />
 
                     {/* Info Text */}
