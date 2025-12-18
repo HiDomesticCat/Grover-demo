@@ -68,27 +68,28 @@ const GeometricView: React.FC<GeometricViewProps> = ({ states, targetIndices }) 
 	const angleDegree = (angleRadian * 180) / Math.PI;
 	const finalAngle = Math.abs(angleDegree);
 	
+    const currentAngleRad = Math.atan2(yVal, xVal)
 	const initAngleRadius = Math.atan2(sinThetaDiv2, cosThetaDiv2);
 	const arcRadius = 30;
 	
-	const getAnglePath = (angleRad: number, arcR: number) =>{
+	const getAnglePath = (startRad: number, endRad: number, arcR: number) =>{
 		//starting point for arc
-		const startXArc = cx + arcR;
-		const startYArc = cy;
+		const startXArc = cx + arcR * Math.cos(startRad);
+		const startYArc = cy - arcR * Math.sin(startRad);
 		//ending point for arc
-		const endXArc = cx + arcR * Math.cos(angleRad);
-		const endYArc = cy - arcR * Math.sin(angleRad); //for SVG if Y is negative
+		const endXArc = cx + arcR * Math.cos(endRad);
+		const endYArc = cy - arcR * Math.sin(endRad); //for SVG if Y is negative
+
+		const sweepFlag = endRad > startRad ? 0 : 1;
+        if (Math.abs(startRad - endRad) < 0.001) return ""; //no arc if angle too small
 		
-		const overFLAGArc = 0;
-		const sweepFlag = angleRad >= 0 ? 0 : 1;
-		
-		/* inherit from Line 159: {`M ${cx + 30} ${cy} A 30 30 0 0 0 ${cx + 30 * Math.cos(-0.1)} ${cy + 30 * Math.sin(-0.1)}`}*/
-		return `M ${startXArc} ${startYArc} A ${arcR} ${arcR} 0 ${overFLAGArc} ${sweepFlag} ${endXArc} ${endYArc}`;
+		/* inherit from Line 156: {`M ${cx + 30} ${cy} A 30 30 0 0 0 ${cx + 30 * Math.cos(-0.1)} ${cy + 30 * Math.sin(-0.1)}`}*/
+		return `M ${startXArc} ${startYArc} A ${arcR} ${arcR} 0 0 ${sweepFlag} ${endXArc} ${endYArc}`;
 		
 	}
 	//calculate the arc path
-	const initArcPath = getAnglePath(initAngleRadius, arcRadius);//for not running first stage
-	const currentArcPath = getAnglePath(angleRadian, arcRadius);//for running or in interation
+	const currentArcPath = getAnglePath(initAngleRadius, currentAngleRad, arcRadius);//display the arc path
+    //[end]
 
     return (
         <div className="w-full bg-quantum-800/50 rounded-lg p-4 border border-quantum-700 flex flex-col">
@@ -129,15 +130,6 @@ const GeometricView: React.FC<GeometricViewProps> = ({ states, targetIndices }) 
                         strokeDasharray="4 4"
                     />
                     <text x={startX + 5} y={startY - 5} fill="#64748b" fontSize="10" fontFamily="monospace">|s⟩</text>
-					
-					{/*showing first stage arc path*/}
-					<path
-                        d={initArcPath}
-                        fill="none"
-                        stroke="#475569"
-                        strokeWidth="1"
-                        opacity="0.5"
-                    />
 
                     {/* Main State Vector */}
                     <line
