@@ -30,6 +30,14 @@ const StateChart: React.FC<StateChartProps> = ({
   meanAmplitude,
   showMean
 }) => {
+
+  const minWidth = 40; 
+
+  const yAxisWidth = 60;
+  
+  //Calculated width if the number of states are too many
+  const calculatedWidth = (data.length * minWidth) + yAxisWidth;
+
   // Custom tooltip to show detailed info
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
@@ -63,7 +71,7 @@ const StateChart: React.FC<StateChartProps> = ({
 
   return (
     <div className="w-full h-64 md:h-80 bg-quantum-800/50 rounded-lg p-4 border border-quantum-700 flex flex-col">
-      <div className="flex justify-between items-start mb-2">
+      <div className="flex justify-between items-start mb-2 flex-shrink-0">
         <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">
           Amplitude Phase Graph
         </h3>
@@ -74,79 +82,89 @@ const StateChart: React.FC<StateChartProps> = ({
         )}
       </div>
 
-      <div className="flex-1 w-full min-h-0">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart
-            data={data}
-            margin={{ top: 10, right: 10, left: 10, bottom: 20 }}
-          >
-            <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
-            <XAxis
-              dataKey="binary"
-              tick={{ fill: '#94a3b8', fontSize: 10, fontFamily: 'monospace' }}
-              interval={0}
+      {/*Scrolling Component Container*/}
+      <div className="flex-1 w-full min-h-0 overflow-x-auto overflow-y-hidden relative custom-scrollbar">
+        <div style={{ minWidth: '100%', width: Math.max(100, calculatedWidth) + 'px', height: '100%' }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart
+              data={data}
+              margin={{ top: 10, right: 10, left: 0, bottom: 20 }}
             >
-              <Label value="Quantum States (Basis Vectors)" offset={0} position="insideBottom" fill="#64748b" style={{ fontSize: '10px' }} />
-            </XAxis>
-            <YAxis
-              tick={{ fill: '#94a3b8', fontSize: 10 }}
-              domain={[-1, 1]}
-            >
-              <Label
-                value="Amplitude (ψ)"
-                angle={-90}
-                position="insideLeft"
-                fill="#94a3b8"
-                style={{ fontSize: '11px', fontWeight: 'bold' }}
-                offset={0}
-              />
-            </YAxis>
-            <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255, 255, 255, 0.05)' }} />
-            <ReferenceLine y={0} stroke="#475569" strokeWidth={1} />
-
-            {/* Mean Amplitude Line - Left Sided */}
-            {showMean && meanAmplitude !== undefined && (
-              <ReferenceLine
-                y={meanAmplitude}
-                stroke="#fbbf24"
-                strokeDasharray="3 3"
-                label={{
-                  position: 'insideLeft',
-                  value: 'Mean Amp',
-                  fill: '#fbbf24',
-                  fontSize: 10,
-                  offset: 10
+              <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+              <XAxis
+                dataKey="binary"
+                interval={0}
+                tick={{ 
+                  fill: '#94a3b8', 
+                  fontSize: 10, 
+                  fontFamily: 'monospace',
+                  textAnchor: 'end'
                 }}
-              />
-            )}
-
-            <Bar
-              dataKey="amplitude"
-              cursor={selectable ? "pointer" : "default"}
-              onClick={(data) => {
-                if (selectable && onBarClick) onBarClick(data.index);
-              }}
-            >
-              {data.map((entry, index) => {
-                const isTarget = targetIndices.includes(index);
-                const isNegative = entry.amplitude < 0;
-
-                let fill = isNegative ? '#f472b6' : '#22d3ee'; // Pink for neg, Cyan for pos
-                if (isTarget) fill = '#8b5cf6'; // Purple for target
-
-                return (
-                  <Cell
-                    key={`cell-${index}`}
-                    fill={fill}
-                    stroke={isTarget ? '#fff' : 'none'}
-                    strokeWidth={isTarget ? 2 : 0}
-                    className="transition-all duration-300 hover:opacity-80"
-                  />
-                );
-              })}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
+                //Rotate labels for better readability
+                angle={-45}
+                height={50}
+                dy={10}
+              >
+                <Label value="Quantum States (Basis Vectors)" offset={-10} position="insideBottom" fill="#64748b" style={{ fontSize: '10px' }} />
+              </XAxis>
+              <YAxis
+                tick={{ fill: '#94a3b8', fontSize: 10 }}
+                domain={[-1, 1]}
+                width={40}
+              >
+                <Label
+                  value="Amplitude (ψ)"
+                  angle={-90}
+                  position="insideLeft"
+                  fill="#94a3b8"
+                  style={{ fontSize: '11px', fontWeight: 'bold' }}
+                  offset={10}
+                />
+              </YAxis>
+              <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255, 255, 255, 0.05)' }} />
+              <ReferenceLine y={0} stroke="#475569" strokeWidth={1} />
+              {/* Mean Amplitude Line */}
+              {showMean && meanAmplitude !== undefined && (
+                <ReferenceLine
+                  y={meanAmplitude}
+                  stroke="#bd933aff"
+                  strokeDasharray="3 3"
+                  label={{
+                    position: 'insideLeft',
+                    value: 'Mean',
+                    fill: '#bd933aff',
+                    fontSize: 10,
+                    offset: 10,
+                    dy: -10,
+                  }}
+                />
+              )}
+              <Bar
+                dataKey="amplitude"
+                cursor={selectable ? "pointer" : "default"}
+                onClick={(data) => {
+                  if (selectable && onBarClick) onBarClick(data.index);
+                }}
+              >
+                {data.map((entry, index) => {
+                  const isTarget = targetIndices.includes(index);
+                  const isNegative = entry.amplitude < 0;
+                  let fill = isNegative ? '#f472b6' : '#22d3ee';
+                  if (isTarget) fill = '#8b5cf6';
+                  return (
+                    <Cell
+                      key={`cell-${index}`}
+                      fill={fill}
+                      stroke={isTarget ? '#fff' : 'none'}
+                      strokeWidth={isTarget ? 2 : 0}
+                      className="transition-all duration-300 hover:opacity-80"
+                    />
+                  );
+                })}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
       </div>
     </div>
   );

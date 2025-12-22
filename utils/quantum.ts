@@ -146,3 +146,55 @@ export const findOptimalIterations = (numStates: number, targetIndices: number[]
 
   return optimalStep;
 };
+
+/*Find the optimal number N in range such that N choose 1 has the highest probability close to 100%*/
+export const findBest_N_InRange = (min: number, max: number, numTargets: number = 1) => {
+  let bestN = -1;
+  let maxProbability = -1;
+  let optimalSteps= 0;
+
+  const k = Math.max(1, numTargets);
+
+  for (let n = min; n <= max; n++) {
+    // 1. 如果 N 小於等於 K，Grover 演算法無意義 (機率恆為 1 或無解)，跳過
+    if (n <= k) continue;
+
+    try {
+      // 2. 計算 theta (確保數值在 domain 內)
+      const ratio = k / n;
+      if (ratio < 0 || ratio > 1) continue;
+      
+      const theta = Math.asin(Math.sqrt(ratio));
+      if (theta <= 0) continue; // 避免 theta 為 0 導致下一步除以零
+
+      // 3. 計算最佳步數
+      // 公式: t = round( pi/(4*theta) - 0.5 )
+      const rawSteps = (Math.PI / (4 * theta)) - 0.5;
+      const steps = Math.max(1, Math.round(rawSteps)); // 至少要跑 1 步
+
+      // 4. 計算機率
+      const finalAngle = (2 * steps + 1) * theta;
+      const probability = Math.pow(Math.sin(finalAngle), 2);
+      
+      // NaN 檢查 (以防萬一)
+      if (isNaN(probability)) continue;
+
+      if (probability > maxProbability) {
+        maxProbability = probability;
+        bestN = n;
+        optimalSteps = steps;
+      }
+    } catch (e) {
+      continue;
+    }
+  }
+
+  // 如果找不到更佳解 (例如範圍設太小)，回傳第一個有效的 N 或 minN
+  if (bestN === -1) {
+      bestN = min;
+      // 簡單估算
+      optimalSteps = Math.round((Math.PI / 4) * Math.sqrt(min / k));
+  }
+
+  return {bestN, maxProbability, optimalSteps};
+}

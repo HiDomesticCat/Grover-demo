@@ -9,7 +9,8 @@ import {
   ArrowRight,
   Pause,
   Zap,
-  AlertTriangle
+  AlertTriangle,
+  Sparkles
 } from 'lucide-react';
 import StateChart from './components/StateChart';
 import ProbabilityChart from './components/ProbabilityChart';
@@ -19,7 +20,8 @@ import {
   createSuperposition,
   applyOracle,
   applyDiffusion,
-  findOptimalIterations
+  findOptimalIterations,
+  findBest_N_InRange
 } from './utils/quantum';
 import { QuantumState, AlgorithmPhase, StepHistory } from './types';
 
@@ -60,6 +62,15 @@ const App: React.FC = () => {
   const totalTargetProbability = states.reduce((sum, s) =>
     targetIndices.includes(s.index) ? sum + s.probability : sum, 0
   );
+
+  //used to find the optimal K choose 1 within given range that having the largest prob
+  const [searchMin, setSearchMin] = useState<number>(4);
+  const [searchMax, setSearchMax] = useState<number>(120);
+
+  const bestNInfo = React.useMemo(() => {
+    const k = targetIndices.length > 0 ? targetIndices.length : 1;
+    return findBest_N_InRange(searchMin, searchMax, k);
+  }, [searchMin, searchMax, targetIndices.length]);
 
   // Initialize on load or reset
   const handleReset = useCallback(() => {
@@ -418,6 +429,63 @@ const App: React.FC = () => {
                         : 'Click again to deselect.'}
                     </p>
                   )}
+                </div>
+                {/*Setting panel for optimal K with N*/}
+                <div className="pt-4 border-t border-quantum-700 mt-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-xs font-semibold text-gray-400 flex items-center gap-1">
+                      <Sparkles className="w-3 h-3 text-yellow-400" />
+                      Best K in Range
+                    </h3>
+                    
+                    <div className="flex items-center gap-1 text-[10px]">
+                      <span className="text-gray-600 mr-1">Range:</span>
+                      <input 
+                        type="number" 
+                        value={searchMin} 
+                        onChange={(e) => setSearchMin(Math.max(4, parseInt(e.target.value) || 4))}
+                        className="w-14 bg-black/40 border border-quantum-600 rounded px-1 text-center text-gray-300 focus:text-white focus:border-quantum-400 outline-none transition-all"
+                      />
+                      <span className="text-gray-500">-</span>
+                      <input 
+                        type="number" 
+                        value={searchMax} 
+                        onChange={(e) => setSearchMax(Math.max(searchMin, parseInt(e.target.value) || 120))}
+                        className="w-14 bg-black/40 border border-quantum-600 rounded px-1 text-center text-gray-300 focus:text-white focus:border-quantum-400 outline-none transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="bg-quantum-900/50 rounded p-3 text-xs text-gray-400 border border-quantum-700/50">
+                    <p className="mb-2 flex justify-between">
+                      <span>Best K with Probability:</span>
+                      <span className={`${isNaN(bestNInfo.maxProbability) ? 'text-gray-500' : 'text-green-400'} font-mono`}>
+                        {(bestNInfo.maxProbability * 100).toFixed(3)}%
+                      </span>
+                    </p>
+                    <div className="flex items-center justify-between bg-quantum-800 rounded p-2 border border-quantum-700">
+                      <div className="flex flex-col gap-0.5">
+                         <span className="text-quantum-accent font-mono font-bold text-sm">K = {bestNInfo.bestN}</span>
+                         <span className="text-[12px] text-gray-500">
+                           Iterations: {bestNInfo.optimalSteps || '?'}
+                         </span>
+                      </div>
+                      
+                      <button 
+                        onClick={() => {
+                          if (bestNInfo.bestN > 0) {
+                            setNumStates(bestNInfo.bestN);
+                            setConfigMode('CUSTOM'); 
+                            handleReset();
+                          }
+                        }}
+                        disabled={phase !== AlgorithmPhase.INIT || isRunning || bestNInfo.bestN === -1}
+                        className="text-[10px] bg-quantum-600 hover:bg-quantum-500 text-white px-3 py-1.5 rounded border border-quantum-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
+                      >
+                        Apply K
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
