@@ -1,0 +1,28 @@
+# Grover's Algorithm Quantum Visualization - Backend Requirements
+# ===================================================
+# Core Web Framework
+fastapi
+uvicorn[standard]
+pydantic
+python-dotenv
+
+# HTTP Client
+httpx
+
+# Quantum Computing
+qiskit
+qiskit-aer
+
+# Numerical Computing
+numpy
+
+# Logging
+loguru
+
+# Testing (optional)
+# pytest
+# pytest-asyncio
+
+# Documentation (optional)
+# mkdocs
+# mkdocs-material

@@ -23,16 +23,14 @@ const GeometricView: React.FC<GeometricViewProps> = ({ states, targetIndices }) 
     const n = states.length;
     const m = targetIndices.length;
 
-    // If no target selected, we are just at start state
+    // If no target selected, show a helpful placeholder with instructions
     if (m === 0) {
-        // Just draw initial state vector pointing close to X axis
-        // Actually if no target, conceptually |w> doesn't exist well, 
-        // but we can assume a hypothetical target or just show generic state.
-        // For UI stability, let's just show |s> aligned with "s" axis and |w> orthogonal?
-        // Better: If no target, simple static view.
         return (
             <div className="w-full h-full bg-quantum-800/50 rounded-lg p-4 border border-quantum-700 flex flex-col items-center justify-center text-gray-400 text-sm">
-                <p>Select target states to visualize geometry</p>
+                <p className="mb-2">Select target state(s) to visualize geometry</p>
+                <p className="text-xs text-gray-500">
+                    The geometric view shows how the state vector rotates toward the target states during Grover's algorithm.
+                </p>
             </div>
         );
     }
@@ -72,24 +70,72 @@ const GeometricView: React.FC<GeometricViewProps> = ({ states, targetIndices }) 
 	const initAngleRadius = Math.atan2(sinThetaDiv2, cosThetaDiv2);
 	const arcRadius = 30;
 	
-	const getAnglePath = (startRad: number, endRad: number, arcR: number) =>{
-		//starting point for arc
-		const startXArc = cx + arcR * Math.cos(startRad);
-		const startYArc = cy - arcR * Math.sin(startRad);
-		//ending point for arc
-		const endXArc = cx + arcR * Math.cos(endRad);
-		const endYArc = cy - arcR * Math.sin(endRad); //for SVG if Y is negative
+	/**
+	 * Generates SVG path for an arc between two angles
+	 * @param startRad Starting angle in radians
+	 * @param endRad Ending angle in radians
+	 * @param arcR Arc radius
+	 * @returns SVG path string for the arc or empty string if invalid
+	 */
+	const getAnglePath = (startRad: number, endRad: number, arcR: number): string => {
+		// Safety checks for valid input values
+		if (isNaN(startRad) || isNaN(endRad) || isNaN(arcR) || arcR <= 0) {
+			console.warn("Invalid arc parameters:", { startRad, endRad, arcR });
+			return "";
+		}
 
-		const sweepFlag = endRad > startRad ? 0 : 1;
-        if (Math.abs(startRad - endRad) < 0.001) return ""; //no arc if angle too small
+		// Calculate starting point for arc (using correct SVG coordinate system)
+		const startXArc = cx + arcR * Math.cos(startRad);
+		const startYArc = cy - arcR * Math.sin(startRad); // Y is inverted in SVG
 		
-		/* inherit from Line 156: {`M ${cx + 30} ${cy} A 30 30 0 0 0 ${cx + 30 * Math.cos(-0.1)} ${cy + 30 * Math.sin(-0.1)}`}*/
-		return `M ${startXArc} ${startYArc} A ${arcR} ${arcR} 0 0 ${sweepFlag} ${endXArc} ${endYArc}`;
+		// Calculate ending point for arc
+		const endXArc = cx + arcR * Math.cos(endRad);
+		const endYArc = cy - arcR * Math.sin(endRad);
+
+		// Calculate angle difference and normalize to [-π, π]
+		let angleDiff = endRad - startRad;
+		while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+		while (angleDiff <= -Math.PI) angleDiff += 2 * Math.PI;
 		
-	}
-	//calculate the arc path
-	const currentArcPath = getAnglePath(initAngleRadius, currentAngleRad, arcRadius);//display the arc path
+		// Skip rendering if angle is too small (avoids visual glitches)
+		const MIN_ANGLE = 0.001;
+		if (Math.abs(angleDiff) < MIN_ANGLE) {
+			return "";
+		}
+
+		// SVG arc parameters
+		const largeArcFlag = Math.abs(angleDiff) > Math.PI ? 1 : 0;
+		const sweepFlag = angleDiff >= 0 ? 1 : 0;
+		
+		// Create SVG arc path
+		return `M ${startXArc} ${startYArc} A ${arcR} ${arcR} 0 ${largeArcFlag} ${sweepFlag} ${endXArc} ${endYArc}`;
+	};
+	
+	// Calculate the arc path with proper bounds checking
+	const currentArcPath = Math.abs(currentAngleRad - initAngleRadius) > 0.001
+		? getAnglePath(initAngleRadius, currentAngleRad, arcRadius)
+		: ""; // No visible arc for very small angles
     //[end]
+
+    // Safety checks for coordinate calculation to avoid NaN values
+    // Validate important calculated values before rendering
+    const isValidCoordinate = (val: number): boolean => !isNaN(val) && isFinite(val);
+    const validStartCoords = isValidCoordinate(startX) && isValidCoordinate(startY);
+    const validVectorCoords = isValidCoordinate(vectorX) && isValidCoordinate(vectorY);
+
+    // Handle case when angle calculation fails
+    if (!validStartCoords || !validVectorCoords) {
+        return (
+            <div className="w-full bg-quantum-800/50 rounded-lg p-4 border border-quantum-700 flex flex-col">
+                <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                    Geometric Interpretation
+                </h3>
+                <div className="flex-1 flex items-center justify-center">
+                    <p className="text-amber-500">Unable to calculate vector coordinates. Try selecting different target state(s).</p>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="w-full bg-quantum-800/50 rounded-lg p-4 border border-quantum-700 flex flex-col">
@@ -97,7 +143,14 @@ const GeometricView: React.FC<GeometricViewProps> = ({ states, targetIndices }) 
                 Geometric Interpretation
             </h3>
             <div className="flex-1 w-full flex items-center justify-center">
-                <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="overflow-visible">
+                <svg
+                    width={width}
+                    height={height}
+                    viewBox={`0 0 ${width} ${height}`}
+                    className="overflow-visible"
+                    role="img"
+                    aria-label="Geometric representation of quantum state vector"
+                >
                     {/* Background Grid/Circle */}
                     <circle cx={cx} cy={cy} r={radius} fill="none" stroke="#334155" strokeDasharray="3 3" />
 
@@ -118,7 +171,7 @@ const GeometricView: React.FC<GeometricViewProps> = ({ states, targetIndices }) 
 						fontSize="12" 
 						fontFamily="monospace"
 					>
-					{`(${finalAngle.toFixed(2)}°)`}
+					{isValidCoordinate(finalAngle) ? `(${finalAngle.toFixed(2)}°)` : ""}
 					</text>
 
                     {/* Initial State Vector (Ghost) */}
@@ -147,19 +200,17 @@ const GeometricView: React.FC<GeometricViewProps> = ({ states, targetIndices }) 
                         </marker>
                     </defs>
 
-                    {/* Angle Indicator (approximate) */}
-					{/* [Modified] showing dynamic arc changing stage*/}
-                    <path
-						/*
-                        d={`M ${cx + 30} ${cy} A 30 30 0 0 0 ${cx + 30 * Math.cos(-0.1)} ${cy + 30 * Math.sin(-0.1)}`} // Just a visual hint, tricky to make dynamic perfectly without complex math
-						
-						*[preserved]*
-						*/
-						d={currentArcPath}
-                        fill="none"
-                        stroke="#22d3ee"
-                        opacity="1"
-                    />
+                    {/* Angle Indicator with bounds checking */}
+                    {currentArcPath && (
+                        <path
+                            d={currentArcPath}
+                            fill="none"
+                            stroke="#22d3ee"
+                            strokeWidth="2"
+                            opacity="0.8"
+                            aria-label={`Rotation angle: ${finalAngle.toFixed(2)} degrees`}
+                        />
+                    )}
 
                     {/* Info Text */}
                     <text x={cx} y={height - 10} textAnchor="middle" fill="#94a3b8" fontSize="11">

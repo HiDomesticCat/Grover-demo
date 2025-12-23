@@ -1,4 +1,12 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
+
+// Augment the Window interface to include our global state storage
+declare global {
+  interface Window {
+    __IDEAL_STATES_HISTORY?: any[][];
+    __IDEAL_HISTORY_DATA?: any[];
+  }
+}
 import {
   Play,
   SkipForward,
@@ -10,7 +18,8 @@ import {
   Pause,
   Zap,
   AlertTriangle,
-  Sparkles
+  Sparkles,
+  AlertCircle
 } from 'lucide-react';
 import StateChart from './components/StateChart';
 import ProbabilityChart from './components/ProbabilityChart';
@@ -25,16 +34,96 @@ import {
 } from './utils/quantum';
 import { QuantumState, AlgorithmPhase, StepHistory } from './types';
 
-const App: React.FC = () => {
+// Error boundary component for catching runtime errors
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode; fallback?: React.ReactNode },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: { children: React.ReactNode; fallback?: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("Application error:", error, errorInfo);
+    // Log error to a service here if needed
+  }
+
+  render() {
+    if (this.state.hasError) {
+      if (this.props.fallback) {
+        return this.props.fallback;
+      }
+      
+      return (
+        <div className="min-h-screen bg-quantum-900 text-gray-100 font-sans p-8 flex flex-col items-center justify-center">
+          <div className="max-w-2xl w-full bg-quantum-800/80 rounded-xl p-8 border border-red-700/30 shadow-xl">
+            <div className="flex items-center gap-3 text-red-400 mb-4">
+              <AlertCircle className="w-8 h-8" />
+              <h2 className="text-xl font-bold">Application Error</h2>
+            </div>
+            <p className="mb-4 text-gray-300">An unexpected error has occurred in the application.</p>
+            
+            {this.state.error && (
+              <div className="bg-red-900/20 border border-red-800/30 rounded p-4 mb-6 font-mono text-sm text-red-200 overflow-auto">
+                {this.state.error.message}
+              </div>
+            )}
+            
+            <button
+              onClick={() => window.location.reload()}
+              className="bg-quantum-700 hover:bg-quantum-600 text-white px-4 py-2 rounded-lg font-medium"
+            >
+              Reload Application
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+// Loading fallback for Suspense
+const LoadingFallback = () => (
+  <div className="min-h-screen bg-quantum-900 flex items-center justify-center">
+    <div className="bg-quantum-800 p-8 rounded-xl border border-quantum-700 shadow-lg flex flex-col items-center">
+      <div className="animate-spin w-12 h-12 border-4 border-quantum-accent border-t-transparent rounded-full mb-4"></div>
+      <h2 className="text-quantum-accent text-xl font-bold mb-2">Loading Quantum Visualizer</h2>
+      <p className="text-gray-400">Initializing quantum state...</p>
+    </div>
+  </div>
+);
+
+const App = () => {
   // --- Config State ---
   const [configMode, setConfigMode] = useState<'QUBITS' | 'CUSTOM'>('QUBITS');
-  // We use numStates as the single source of truth. 
+  // We use numStates as the single source of truth.
   // In QUBITS mode, this will always be a power of 2.
+  // Using state with validation functions
   const [numStates, setNumStates] = useState<number>(16);
   const [targetIndices, setTargetIndices] = useState<number[]>([]);
+  
+  // Qiskit backend state
+  const [useQiskitBackend, setUseQiskitBackend] = useState<boolean>(false);
+  const [qiskitData, setQiskitData] = useState<number[][] | null>(null);
+  const [isQiskitLoading, setIsQiskitLoading] = useState<boolean>(false);
+  
+  // Input validation with min/max constraints
+  const [noiseLevel, setNoiseLevel] = useState<number>(0.005);
+  
+  // Global application state
+  const [appError, setAppError] = useState<string | null>(null);
+  const [backendConnected, setBackendConnected] = useState<boolean | null>(null);
 
   // --- Runtime State ---
   const [states, setStates] = useState<QuantumState[]>([]);
+  const [idealStates, setIdealStates] = useState<QuantumState[]>([]);  // Added for Qiskit/Ideal comparison
   const [phase, setPhase] = useState<AlgorithmPhase>(AlgorithmPhase.INIT);
   const [stepCount, setStepCount] = useState<number>(0);
   const [subStep, setSubStep] = useState<'ORACLE' | 'DIFFUSION'>('ORACLE');
@@ -48,8 +137,8 @@ const App: React.FC = () => {
   // Use simulation to find optimal iterations based on current selection
   const optimalIterations = findOptimalIterations(numStates, targetIndices);
 
-  const isAtOptimal = stepCount === optimalIterations && subStep === 'ORACLE';
-  const isOverRotated = stepCount > optimalIterations;
+  const isAtOptimal = targetIndices.length > 0 && stepCount === optimalIterations && subStep === 'ORACLE';
+  const isOverRotated = targetIndices.length > 0 && stepCount > optimalIterations;
 
   // --- Derived Statistics ---
   // Mean Amplitude: The axis of inversion for diffusion (sum of amplitudes / N)
@@ -72,31 +161,73 @@ const App: React.FC = () => {
     return findBest_N_InRange(searchMin, searchMax, k);
   }, [searchMin, searchMax, targetIndices.length]);
 
-  // Initialize on load or reset
-  const handleReset = useCallback(() => {
-    setIsRunning(false); // Stop running immediately
-
-    // Always start with |0...0> (or uniform zero-index start)
-    const initial = initializeState(numStates, 0);
-    setStates(initial);
+  // Helper function to reset simulation state to initial before a new run
+  const resetSimulationState = useCallback(() => {
+    setIsRunning(false); // Stop any existing loops immediately
+    setQiskitData(null);
+    setIdealStates([]);  // Reset ideal states
     setPhase(AlgorithmPhase.INIT);
     setStepCount(0);
     setSubStep('ORACLE');
-
     setHistory([{ step: 0, probTarget: 0, probOthers: 1 }]);
-    setTargetIndices([]);
-  }, [numStates]);
+  }, []);
 
-  // Handle State Count Change
+  // Initialize on load or reset
+  const handleReset = useCallback(() => {
+    // Use the same reset logic for a clean state
+    resetSimulationState();
+    
+    // Also reset target indices and states for complete reset
+    setTargetIndices([]);
+    
+    // Always start with |0...0> (or uniform zero-index start)
+    const initial = initializeState(numStates, 0);
+    setStates(initial);
+  }, [numStates, resetSimulationState]);
+
+  // Handle State Count Change with validation
   useEffect(() => {
-    handleReset();
+    if (numStates > 0 && numStates <= 128) { // Safe bounds for visualization
+      handleReset();
+    }
   }, [numStates, handleReset]);
+  
+  // Check backend connection on load
+  useEffect(() => {
+    const checkBackend = async () => {
+      if (useQiskitBackend) {
+        try {
+          const backendUrl = `${process.env.VITE_BACKEND_URL || 'http://localhost:8000'}/`;
+          const response = await fetch(backendUrl, {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+          });
+          
+          if (response.ok) {
+            setBackendConnected(true);
+            setAppError(null);
+          } else {
+            setBackendConnected(false);
+            setAppError('Backend server is running but returned an error. Check console for details.');
+          }
+        } catch (error) {
+          console.error('Backend connection error:', error);
+          setBackendConnected(false);
+          setAppError('Cannot connect to quantum backend server. Make sure it\'s running.');
+        }
+      }
+    };
+    
+    checkBackend();
+  }, [useQiskitBackend]);
 
   // --- Actions ---
 
   const handleCreateSuperposition = () => {
     const newStates = createSuperposition(states);
     setStates(newStates);
+    // Initialize ideal states to match initial superposition
+    setIdealStates(newStates);
     setPhase(AlgorithmPhase.SUPERPOSITION);
 
     // Initial history
@@ -169,35 +300,539 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!isRunning) return;
 
-    // Auto-stop condition: Stop exactly at optimal iterations
-    if (stepCount >= optimalIterations && subStep === 'ORACLE') {
+    // 1. Auto-stop conditions
+    if (useQiskitBackend) {
+      // Only stop when we've actually reached the end of the Qiskit data
+      // This ensures we process ALL steps from the backend
+      if (qiskitData && Array.isArray(qiskitData)) {
+        // Check if we've reached the end of available Qiskit data
+        if (stepCount >= (qiskitData.length - 1)) {
+          console.log("Reached end of Qiskit data, stopping simulation");
+          setIsRunning(false);
+          return;
+        }
+      }
+    } else if (stepCount >= optimalIterations && subStep === 'ORACLE') {
+      // For mathematical simulation, stop at optimal iterations
       setIsRunning(false);
       return;
     }
+    
+    // Clear any errors that might have happened before
+    if (appError) {
+      setAppError(null);
+    }
 
+    // 2. Timer Loop
     const timer = setTimeout(() => {
-      executeStep();
-    }, 1000);
+      if (useQiskitBackend) {
+        // Qiskit Mode: Iterate through pre-fetched data
+        if (qiskitData && Array.isArray(qiskitData)) {
+          // Calculate next step
+          const nextStep = stepCount + 1;
+          
+          console.log(`Processing Qiskit data step ${nextStep}/${qiskitData.length-1}`);
+          
+          // Ensure next step is within array bounds
+          if (nextStep < qiskitData.length) {
+            // Update step counter first
+            setStepCount(nextStep);
+            
+            // Get probabilities for this step from Qiskit data
+            const currentStepProbs = qiskitData[nextStep];
+            
+            // Ensure we have valid probability data
+            if (Array.isArray(currentStepProbs) && currentStepProbs.length === numStates) {
+              // 1) Update state visualization with Qiskit data (Bar Chart)
+              setStates(prevStates => prevStates.map((state, idx) => ({
+                ...state,
+                probability: idx < currentStepProbs.length ? currentStepProbs[idx] : 0,
+                // Estimate amplitude from probability (√p), preserving any existing sign
+                amplitude: Math.sqrt(
+                  idx < currentStepProbs.length ? currentStepProbs[idx] : 0
+                ) * (state.amplitude >= 0 ? 1 : -1)
+              })));
+              
+              // 2) Use pre-calculated ideal data for perfect mathematical simulation
+              if (window.__IDEAL_STATES_HISTORY && Array.isArray(window.__IDEAL_STATES_HISTORY)) {
+                // Use the exact pre-calculated states from initialization
+                if (nextStep < window.__IDEAL_STATES_HISTORY.length) {
+                  // Deep copy to avoid reference issues - CRITICAL for consistency
+                  const idealStateForStep = window.__IDEAL_STATES_HISTORY[nextStep].map(s => ({...s}));
+                  setIdealStates(idealStateForStep);
+                } else {
+                  console.warn(`No pre-calculated ideal data for step ${nextStep}`);
+                }
+              } else {
+                console.warn("No ideal state history available - using fallback calculation");
+                // This should rarely happen but included for robustness
+                let newIdealStates: QuantumState[] = [];
+                
+                if (idealStates.length === 0) {
+                  // Start with superposition if we don't have states
+                  newIdealStates = createSuperposition(
+                    Array.from({length: numStates}, (_, i) => ({
+                      index: i,
+                      binary: i.toString(2).padStart(Math.ceil(Math.log2(numStates)), '0'),
+                      amplitude: 0,
+                      probability: 0,
+                      phase: 0
+                    }))
+                  );
+                } else if (targetIndices.length > 0) {
+                  // Otherwise keep calculating based on existing ideal states
+                  // Use correct progression of oracle/diffusion based on step number
+                  if (nextStep % 2 === 1) { // Odd steps apply oracle
+                    newIdealStates = applyOracle([...idealStates], targetIndices);
+                  } else { // Even steps apply diffusion (except step 0)
+                    newIdealStates = applyDiffusion([...idealStates]);
+                  }
+                }
+                
+                setIdealStates(newIdealStates);
+              }
+              
+              // Calculate target probability for history chart
+              const probTarget = currentStepProbs.reduce((sum: number, val: number, idx: number) =>
+                targetIndices.includes(idx) ? sum + val : sum, 0
+              );
+              
+              // Calculate average non-target probability
+              const numNonTargets = numStates - targetIndices.length;
+              const probOthers = numNonTargets > 0 ? (1 - probTarget) / numNonTargets : 0;
+              
+              // [FIXED] Calculate ideal probabilities from idealStates
+              // We must use the pre-calculated data from the window object.
+              // Using 'idealStates' directly is buggy because setIdealStates is async,
+              // so we would be calculating based on the STALE state from the previous render.
+              let idealProbTarget = undefined;
+              let idealProbOthers = undefined;
+              
+              if (window.__IDEAL_HISTORY_DATA && Array.isArray(window.__IDEAL_HISTORY_DATA)) {
+                if (nextStep < window.__IDEAL_HISTORY_DATA.length) {
+                  const idealData = window.__IDEAL_HISTORY_DATA[nextStep];
+                  idealProbTarget = idealData.idealProbTarget;
+                  idealProbOthers = idealData.idealProbOthers;
+                  
+                  // Debug logging to verify correct values
+                  console.log(`Step ${nextStep} using pre-calculated ideal data: targetProb=${(idealProbTarget as number * 100).toFixed(2)}%`);
+                }
+              }
+              // Fallback only if window data is missing (rare)
+              else if (idealStates.length > 0) {
+                // Sum probabilities of all target indices in ideal states
+                idealProbTarget = idealStates.reduce((sum, state) =>
+                  targetIndices.includes(state.index) ? sum + state.probability : sum, 0);
+                
+                // Average probability of non-target states in ideal calculation
+                idealProbOthers = numNonTargets > 0 ? (1 - idealProbTarget) / numNonTargets : 0;
+                
+                console.warn(`Using fallback ideal probability calculation: ${(idealProbTarget as number * 100).toFixed(2)}%`);
+              }
+              
+              // Add to history chart (prevents duplicate entries)
+              setHistory(prevHist => {
+                if (prevHist.length > 0 && prevHist[prevHist.length - 1].step === nextStep) {
+                  return prevHist; // Prevent duplicates
+                }
+                return [...prevHist, {
+                  step: nextStep,
+                  probTarget,
+                  probOthers,
+                  idealProbTarget,
+                  idealProbOthers
+                }];
+              });
+            } else {
+              console.warn("Invalid probability data at step", nextStep, currentStepProbs);
+            }
+          } else {
+            // We've processed all available Qiskit data steps
+            console.log("Reached end of Qiskit data steps");
+            setIsRunning(false);
+          }
+        } else {
+          console.warn("Qiskit data unavailable or invalid format");
+          // Don't stop running - data might arrive later
+        }
+      } else {
+        // Local Simulation Mode
+        executeStep();
+      }
+    }, 1000); // 1 second per step
 
     return () => clearTimeout(timer);
-  }, [isRunning, stepCount, subStep, optimalIterations, executeStep]);
+  }, [isRunning, stepCount, subStep, optimalIterations, executeStep, useQiskitBackend, qiskitData, targetIndices, numStates]);
 
 
   const handleStep = () => {
-    executeStep();
+    // Synchronized stepping with Qiskit + Ideal comparison
+    if (useQiskitBackend) {
+      // Ensure we have data and aren't at the end
+      if (qiskitData && Array.isArray(qiskitData) && stepCount < qiskitData.length - 1) {
+        const nextStep = stepCount + 1;
+        
+        // 1. Update Step Count
+        setStepCount(nextStep);
+        
+        // 2. A) Process Qiskit Real Data
+        const currentStepProbs = qiskitData[nextStep];
+        
+        if (Array.isArray(currentStepProbs)) {
+          // Update Bar Chart (States) with Qiskit data
+          setStates(prevStates => prevStates.map((state, idx) => ({
+            ...state,
+            probability: currentStepProbs[idx],
+            // Estimate amplitude sign for visual consistency (Qiskit only gives probs)
+            amplitude: Math.sqrt(currentStepProbs[idx]) * (state.amplitude >= 0 ? 1 : -1)
+          })));
+          
+          // 2. B) Simultaneously Calculate Ideal Mathematical Result
+          // Create temp ideal states to apply mathematical oracle+diffusion
+          let tempIdealStates = [...idealStates];
+          
+          // If ideal states haven't been created yet, initialize from current states
+          if (tempIdealStates.length === 0 && stepCount === 0) {
+            // Start with same superposition
+            tempIdealStates = createSuperposition(states);
+          }
+          
+          // Apply mathematical simulation to ideal states
+          // Apply enough steps to match the current stepCount
+          if (targetIndices.length > 0 && tempIdealStates.length > 0) {
+            // Use the pre-calculated ideal states instead of calculating on the fly
+            // This ensures consistency with the mathematical simulation
+            if (window.__IDEAL_STATES_HISTORY && Array.isArray(window.__IDEAL_STATES_HISTORY)) {
+              if (nextStep < window.__IDEAL_STATES_HISTORY.length) {
+                // Get the pre-calculated ideal state for this step
+                const idealStateForStep = window.__IDEAL_STATES_HISTORY[nextStep];
+                // Deep copy to avoid reference issues
+                setIdealStates(idealStateForStep.map(s => ({...s})));
+              } else {
+                console.warn(`Step ${nextStep} exceeds pre-calculated ideal states (length: ${window.__IDEAL_STATES_HISTORY.length})`);
+              }
+            } else {
+              console.warn("No pre-calculated ideal state history available");
+              // Only as fallback - create ideal states from scratch
+              if (tempIdealStates.length === 0) {
+                tempIdealStates = createSuperposition(states);
+              }
+              
+              // [FIXED LOGIC] Apply both Oracle and Diffusion for each step
+              // to maintain consistency with our pre-calculation logic
+              // and match Qiskit's granularity (1 step = 1 full Grover iteration)
+              tempIdealStates = applyOracle(tempIdealStates, targetIndices);
+              tempIdealStates = applyDiffusion(tempIdealStates);
+              
+              setIdealStates(tempIdealStates);
+            }
+          }
+          
+          // 3. Update Line Chart (History)
+          const probTarget = currentStepProbs.reduce((sum: number, val: number, idx: number) =>
+            targetIndices.includes(idx) ? sum + val : sum, 0
+          );
+          
+          const numNonTargets = numStates - targetIndices.length;
+          const probOthers = numNonTargets > 0 ? (1 - probTarget) / numNonTargets : 0;
+          
+          // Calculate ideal probabilities from idealStates if available
+          let idealProbTarget = undefined;
+          let idealProbOthers = undefined;
+          
+          // Get ideal probabilities from pre-calculated data rather than calculating on-the-fly
+          if (window.__IDEAL_HISTORY_DATA && Array.isArray(window.__IDEAL_HISTORY_DATA)) {
+            if (nextStep < window.__IDEAL_HISTORY_DATA.length) {
+              const idealData = window.__IDEAL_HISTORY_DATA[nextStep];
+              idealProbTarget = idealData.idealProbTarget;
+              idealProbOthers = idealData.idealProbOthers;
+            }
+          }
+          // Fallback calculation only if needed
+          else if (tempIdealStates.length > 0) {
+            // CRITICAL: Ensure we're calculating probabilities consistently - always use amplitude squared
+            idealProbTarget = tempIdealStates.reduce((sum, state) => {
+              if (targetIndices.includes(state.index)) {
+                const prob = Math.pow(state.amplitude, 2);
+                console.log(`Step ${nextStep} - Ideal state ${state.index}: amplitude=${state.amplitude.toFixed(4)}, probability=${(prob*100).toFixed(2)}%`);
+                return sum + prob;
+              }
+              return sum;
+            }, 0);
+            
+            console.log(`Step ${nextStep} - Total ideal target probability: ${(idealProbTarget * 100).toFixed(4)}%`);
+            
+            // Average probability of non-target states
+            idealProbOthers = numNonTargets > 0 ? (1 - idealProbTarget) / numNonTargets : 0;
+          }
+
+          setHistory(prevHist => {
+            // Avoid duplicate entries
+            if (prevHist.length > 0 && prevHist[prevHist.length - 1].step === nextStep) return prevHist;
+            return [...prevHist, {
+              step: nextStep,
+              probTarget,
+              probOthers,
+              idealProbTarget,
+              idealProbOthers
+            }];
+          });
+        }
+      }
+    } else {
+      // Default: Local mathematical simulation
+      executeStep();
+    }
   };
 
-  const handleRun = () => {
-    if (targetIndices.length === 0) return;
-    setIsRunning(true);
+  // Handle the run button click
+  const handleRun = async () => {
+    // Validate inputs before running
+    if (targetIndices.length === 0) {
+      setAppError("Please select at least one target state before running");
+      return;
+    }
+    
+    // Clear any previous errors
+    setAppError(null);
+    
+    // Ensure clean state before starting a new simulation
+    resetSimulationState();
+    
+    // If Qiskit backend is enabled, we'll get the data from the backend
+    // Otherwise, we use the existing states and apply superposition
+    if (useQiskitBackend) {
+      // Calculate number of qubits needed
+      const calculatedNumQubits = Math.ceil(Math.log2(numStates));
+      await fetchQiskitSimulation(calculatedNumQubits, targetIndices, noiseLevel);
+    } else {
+      try {
+        // For local simulation, apply superposition to current states
+        const newStates = createSuperposition(states);
+        setStates(newStates);
+        setPhase(AlgorithmPhase.SUPERPOSITION);
+        setIsRunning(true);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        setAppError(`Local simulation error: ${errorMessage}`);
+        setIsRunning(false);
+      }
+    }
   };
 
+  // Separate function to fetch Qiskit simulation data
+  const fetchQiskitSimulation = async (numQubits: number, targetIndices: number[], noiseLevel: number) => {
+    setIsQiskitLoading(true);
+    setAppError(null);
+    
+    try {
+      // Validate number of qubits (backend has limit of 10)
+      if (numQubits > 10) {
+        throw new Error(`Number of qubits (${numQubits}) exceeds maximum limit (10)`);
+      }
+        
+      // Get backend URL from environment with fallback
+      const backendUrl = `${process.env.VITE_BACKEND_URL || 'http://localhost:8000'}/simulate`;
+      
+      const response = await fetch(backendUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          num_qubits: numQubits,
+          target_indices: targetIndices,
+          noise_value: noiseLevel,
+          iterations: optimalIterations // Use -1 to tell backend to use the calculated optimal iterations
+                         // Backend will ensure proper number of iterations for specific cases
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        // Store the history data - backend always returns data.history as number[][]
+        if (data.history) {
+          // 1. Store raw Qiskit simulation results
+          setQiskitData(data.history);
+          
+          // 2. Pre-calculate ideal states for all steps
+          // We need to pre-calculate the entire ideal history in one go
+          try {
+            console.log("Pre-calculating ideal mathematical states...");
+            
+            // Create the initial superposition state
+            const initial = initializeState(numStates, 0);
+            const initialSuperposition = createSuperposition(initial);
+            
+            // Set the initial state both for display and our calculations
+            setIdealStates(initialSuperposition);
+            
+            // Create an array to store all intermediate ideal states (for each step)
+            // This becomes our lookup table during the animation loop
+            const idealStatesHistory: QuantumState[][] = [];
+            
+            // IMPORTANT: We need to simulate using a consistent approach between modes
+            // For Qiskit integration, each step = 1 full Grover iteration (Oracle + Diffusion)
+            
+            // Step 0: Initial state is superposition
+            idealStatesHistory.push([...initialSuperposition]);
+            
+            // Initialize current state with a deep copy to avoid reference issues
+            let currentState: QuantumState[] = initialSuperposition.map(s => ({...s}));
+
+            // Get the exact number of iterations from Qiskit data
+            const maxSteps = data.history ? data.history.length - 1 : 0;
+            console.log(`Pre-calculating ${maxSteps} steps of ideal mathematical state (1 step = 1 full Grover iteration)...`);
+
+            // [FIXED LOGIC]
+            // Qiskit returns 1 step = Oracle + Diffusion. We must match this granularity.
+            // We no longer toggle between sub-steps.
+            for (let step = 0; step < maxSteps; step++) {
+              
+              // 1. Apply Oracle
+              currentState = applyOracle(currentState, targetIndices);
+              
+              // 2. Apply Diffusion
+              currentState = applyDiffusion(currentState);
+              
+              // Create a deep copy of the current state to avoid reference issues
+              const stateCopy = currentState.map(state => ({...state}));
+              
+              // Store this FULL step's state
+              idealStatesHistory.push(stateCopy);
+              
+              // Verify amplitudes are correct (for debugging)
+              const sum = stateCopy.reduce((acc, s) => acc + Math.pow(s.amplitude, 2), 0);
+              if (Math.abs(sum - 1) > 0.001) {
+                console.warn(`Step ${step} has invalid sum of probabilities: ${sum}`);
+              }
+            }
+            
+            // Store this history in a global ref for access during animation
+            // We'll use this to sync with Qiskit data at each step
+            window.__IDEAL_STATES_HISTORY = idealStatesHistory;
+            
+            console.log(`Ideal states pre-calculation complete! Generated ${idealStatesHistory.length} step states.`);
+            
+            // Also calculate and store ideal probabilities for history chart
+            const idealHistoryData = idealStatesHistory.map((states, stepIndex) => {
+              // Calculate probability of target states in this step
+              // CRITICAL: Ensure we use amplitude^2 for consistent probability calculation
+              const idealProbTarget = states.reduce((sum, state) => {
+                if (targetIndices.includes(state.index)) {
+                  // IMPORTANT: Always recalculate probability from amplitude to ensure consistency
+                  // This is critical to get 99.96% success rate for optimal iterations
+                  const prob = Math.pow(state.amplitude, 2);
+                  console.log(`Ideal target state ${state.index} has probability: ${(prob * 100).toFixed(2)}%`);
+                  return sum + prob;
+                }
+                return sum;
+              }, 0);
+              
+              // Log the total ideal probability for debugging
+              console.log(`Step ${stepIndex}: Total ideal target probability: ${(idealProbTarget * 100).toFixed(2)}%`);
+              
+              // Calculate average non-target probability
+              const numNonTargets = numStates - targetIndices.length;
+              const idealProbOthers = numNonTargets > 0 ? (1 - idealProbTarget) / numNonTargets : 0;
+              
+              return {
+                step: stepIndex,
+                idealProbTarget,
+                idealProbOthers
+              };
+            });
+            
+            // Store ideal history data for chart access
+            window.__IDEAL_HISTORY_DATA = idealHistoryData;
+            
+          } catch (error) {
+            console.error("Failed to pre-calculate ideal states:", error);
+            // Still continue with Qiskit data, even if ideal calculation fails
+          }
+        }
+        
+        // Store and use backend-calculated optimal iterations
+        const backendOptimalIterations = data.optimal_iterations;
+        if (backendOptimalIterations !== undefined && !isNaN(backendOptimalIterations)) {
+          console.log(`Backend optimal iterations: ${backendOptimalIterations}, Frontend calculated: ${optimalIterations}`);
+          // Override local calculation with backend value for consistency
+          // This is crucial since backend uses different formula with more precise physics calculation
+          const backendIters = Number(backendOptimalIterations);
+          if (backendIters > 0) {
+            // Create an effect to update optimalIterations after render
+            setTimeout(() => {
+              console.log(`Using backend's optimal iterations: ${backendIters}`);
+              // We can't directly modify optimalIterations (derived value),
+              // but we can show the correct value in the UI
+              document.getElementById('optimal-iterations-count')?.setAttribute('data-backend-value', String(backendIters));
+            }, 100);
+          }
+        }
+        
+        // We also need superposition states for initial display
+        const initial = initializeState(numStates, 0);
+        const newStates = createSuperposition(initial);
+        setStates(newStates);
+        setPhase(AlgorithmPhase.SUPERPOSITION);
+        
+        // Set phase to RUNNING
+        setTimeout(() => {
+          setPhase(AlgorithmPhase.RUNNING);
+          setIsRunning(true);
+        }, 0);
+      } else {
+        // Handle specific backend error codes
+        if (data.code === 'VALIDATION_ERROR') {
+          setAppError(`Backend validation error: ${data.error}`);
+        } else if (data.code === 'SIMULATION_ERROR') {
+          setAppError(`Quantum simulation failed: ${data.error}`);
+        } else {
+          setAppError(data.error || "Unknown error during quantum simulation");
+        }
+        
+        console.error('Qiskit simulation failed:', data.error);
+        setQiskitData(null);
+        setIsRunning(false);
+        
+        // Display a user-friendly error with specific troubleshooting tips
+        setAppError(
+          data.code === 'VALIDATION_ERROR'
+            ? `Input validation failed: ${data.error}. Check the number of qubits and target indices.`
+            : `Quantum simulation error: ${data.error}. Try reducing the noise level or number of qubits.`
+        );
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Failed to connect to Qiskit backend:', error);
+      
+      // More detailed error message with troubleshooting steps
+      if (errorMessage.includes('NetworkError') || errorMessage.includes('Failed to fetch')) {
+        setAppError(`Cannot connect to the backend server. Please ensure the Python server is running with: python backend/main.py`);
+      } else {
+        setAppError(`Backend error: ${errorMessage}. Check if the server is running and properly configured.`);
+      }
+      
+      setQiskitData(null);
+      setIsRunning(false);
+    } finally {
+      setIsQiskitLoading(false);
+    }
+  };
+  
+  // Developer Note: To use the real Qiskit backend, make sure to run:
+  // cd backend && pip install -r requirements.txt && python main.py
+  
+  // Pause the running simulation
   const handlePause = () => {
     setIsRunning(false);
   };
 
   return (
-    <div className="min-h-screen bg-quantum-900 text-gray-100 font-sans selection:bg-quantum-accent selection:text-black">
+    <ErrorBoundary>
+      <Suspense fallback={<LoadingFallback />}>
+        <div className="min-h-screen bg-quantum-900 text-gray-100 font-sans selection:bg-quantum-accent selection:text-black">
 
       {/* Header */}
       <header className="border-b border-quantum-800 bg-quantum-900/50 backdrop-blur sticky top-0 z-50">
@@ -223,7 +858,52 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      <main className="max-w-[1600px] mx-auto px-4 py-8 space-y-6">
+        {/* Global Error Alert */}
+        {appError && (
+          <div className="fixed top-0 left-0 w-full bg-red-800/90 text-white py-3 px-4 z-50 shadow-md backdrop-blur-sm">
+            <div className="max-w-7xl mx-auto flex items-start gap-3">
+              <AlertTriangle className="w-6 h-6 flex-shrink-0 mt-0.5 text-red-200" />
+              <div className="flex-1">
+                <p className="font-medium text-red-100">{appError}</p>
+                
+                {/* Troubleshooting tips based on error type */}
+                {typeof appError === 'string' && (
+                  <>
+                    {(appError.includes('backend') || appError.includes('Backend')) ? (
+                      <div className="mt-2 p-2 bg-red-900/50 border border-red-700/50 rounded text-xs text-red-200">
+                        <strong className="block mb-1">Troubleshooting:</strong>
+                        <ul className="list-disc list-inside space-y-1">
+                          <li>Ensure the Python backend is running: <code className="bg-black/30 px-1 rounded">python backend/main.py</code></li>
+                          <li>Check if the BACKEND_URL in your .env file is correct</li>
+                          <li>Verify that all required Python packages are installed</li>
+                          <li>Try with fewer qubits if system resources are limited</li>
+                        </ul>
+                      </div>
+                    ) : appError.includes('simulation') ? (
+                      <div className="mt-2 p-2 bg-red-900/50 border border-red-700/50 rounded text-xs text-red-200">
+                        <strong className="block mb-1">Suggestions:</strong>
+                        <ul className="list-disc list-inside space-y-1">
+                          <li>Try reducing the noise level</li>
+                          <li>Use fewer qubits (currently limited to 10 max)</li>
+                          <li>Select different target states</li>
+                        </ul>
+                      </div>
+                    ) : null}
+                  </>
+                )}
+              </div>
+              <button
+                onClick={() => setAppError(null)}
+                className="bg-red-700 hover:bg-red-600 p-1 rounded"
+                aria-label="Dismiss error"
+              >
+                &times;
+              </button>
+            </div>
+          </div>
+        )}
+        
+        <main className="max-w-[1600px] mx-auto px-4 py-8 space-y-6">
 
         {/* --- Top Row: Config | Amplitude | Geometry --- */}
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
@@ -248,8 +928,9 @@ const App: React.FC = () => {
                     {!isRunning ? (
                       <button
                         onClick={handleRun}
-                        disabled={targetIndices.length === 0 || isOverRotated || isAtOptimal}
+                        disabled={targetIndices.length === 0 || isQiskitLoading}
                         className="bg-quantum-success/90 hover:bg-quantum-success text-white py-2 rounded-lg font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                        aria-label="Run quantum simulation"
                       >
                         <Play className="w-4 h-4" /> Run
                       </button>
@@ -257,14 +938,15 @@ const App: React.FC = () => {
                       <button
                         onClick={handlePause}
                         className="bg-yellow-600 hover:bg-yellow-500 text-white py-2 rounded-lg font-semibold transition-all flex items-center justify-center gap-2"
+                        aria-label="Pause quantum simulation"
                       >
                         <Pause className="w-4 h-4" /> Pause
                       </button>
                     )}
                     <button
                       onClick={handleStep}
-                      disabled={targetIndices.length === 0 || isRunning}
-                      className="bg-quantum-700 hover:bg-quantum-600 text-white py-2 rounded-lg font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                      disabled={targetIndices.length === 0 || isRunning || isQiskitLoading}
+                      className={`bg-quantum-700 hover:bg-quantum-600 text-white py-2 rounded-lg font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${isQiskitLoading ? 'cursor-wait opacity-70' : ''}`}
                     >
                       <SkipForward className="w-4 h-4" /> Step
                     </button>
@@ -282,21 +964,27 @@ const App: React.FC = () => {
                 <div className="flex justify-between border-b border-gray-800 pb-1">
                   <span className="text-gray-500">Iterations:</span>
                   <span className={isOverRotated ? 'text-red-400 font-bold' : 'text-white'}>
-                    {stepCount} <span className="text-gray-600">/ {optimalIterations}</span>
+                    {stepCount} <span className="text-gray-600">/ <span id="optimal-iterations-count" data-backend-value={optimalIterations}>
+                      {useQiskitBackend && qiskitData ? `${qiskitData.length-1}` : optimalIterations}
+                    </span></span>
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-500">Status:</span>
-                  {isAtOptimal ? (
-                    <span className="text-quantum-success font-bold flex items-center gap-1">Optimal Reached</span>
-                  ) : isOverRotated ? (
-                    <span className="text-red-400 font-bold flex items-center gap-1">
-                      <AlertTriangle className="w-3 h-3" /> Over-rotating
-                    </span>
+                  {targetIndices.length > 0 ? (
+                    isAtOptimal ? (
+                      <span className="text-quantum-success font-bold flex items-center gap-1">Optimal Reached</span>
+                    ) : isOverRotated ? (
+                      <span className="text-red-400 font-bold flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3" /> Over-rotating
+                      </span>
+                    ) : (
+                      <span className="text-quantum-accent flex items-center gap-1">
+                        {subStep === 'ORACLE' ? 'Next: Oracle' : 'Next: Diffusion'}
+                      </span>
+                    )
                   ) : (
-                    <span className="text-quantum-accent flex items-center gap-1">
-                      {subStep === 'ORACLE' ? 'Next: Oracle' : 'Next: Diffusion'}
-                    </span>
+                    <span className="text-gray-500">Select target states</span>
                   )}
                 </div>
               </div>
@@ -313,6 +1001,13 @@ const App: React.FC = () => {
                 onBarClick={handleSelectTarget}
                 meanAmplitude={meanAmplitude}
                 showMean={subStep === 'ORACLE' || subStep === 'DIFFUSION'}
+                qiskitData={
+                  useQiskitBackend && qiskitData && Array.isArray(qiskitData) && stepCount < qiskitData.length
+                    ? qiskitData[stepCount]  // This is already correctly typed as number[]
+                    : null
+                }
+                idealData={useQiskitBackend ? idealStates : undefined} // Pass ideal data for comparison
+                isLoading={isQiskitLoading} // Pass loading state to show skeletons
               />
             </div>
             <div className="flex justify-between text-[10px] text-gray-500 px-2">
@@ -397,7 +1092,7 @@ const App: React.FC = () => {
                         value={numStates}
                         onChange={(e) => {
                           const val = parseInt(e.target.value);
-                          if (!isNaN(val) && val >= 4 && val <= 1024) setNumStates(val);
+                          if (!isNaN(val) && val >= 4 && val <= 128) setNumStates(val);
                         }}
                         disabled={phase !== AlgorithmPhase.INIT}
                         className="w-full bg-quantum-900 border border-quantum-700 text-white p-1.5 text-sm rounded focus:ring-quantum-accent focus:border-quantum-accent disabled:opacity-50"
@@ -486,6 +1181,84 @@ const App: React.FC = () => {
                       </button>
                     </div>
                   </div>
+                  
+                  {/* Qiskit Backend Toggle */}
+                  <div className="pt-4 border-t border-quantum-700">
+                    <div className="flex flex-col">
+                      <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={useQiskitBackend}
+                          onChange={(e) => {
+                            // If currently running, stop the algorithm before changing backend
+                            if (isRunning) {
+                              setIsRunning(false);
+                            }
+                            setUseQiskitBackend(e.target.checked);
+                          }}
+                          className="rounded bg-quantum-900 border-quantum-700 text-quantum-accent focus:ring-quantum-accent"
+                          aria-label="Use real Qiskit backend"
+                        />
+                        <span>Use Real Qiskit Backend (Python)</span>
+                      </label>
+                      
+                      {/* Backend Status Indicator */}
+                      {useQiskitBackend && (
+                        <div className="flex flex-col gap-2 mt-2 ml-5">
+                          <div className="flex items-center gap-2 text-[10px]">
+                            <div className={`w-2 h-2 rounded-full ${
+                              backendConnected === null ? 'bg-gray-500' :
+                              backendConnected ? 'bg-green-500' : 'bg-red-500'
+                            }`}></div>
+                            <span className={
+                              backendConnected === null ? 'text-gray-500' :
+                              backendConnected ? 'text-green-500' : 'text-red-500'
+                            }>
+                              {backendConnected === null ? 'Checking connection...' :
+                               backendConnected ? 'Backend connected' : 'Backend not available'}
+                            </span>
+                          </div>
+                          
+                          {/* Add explanation about the Qiskit simulation */}
+                          {useQiskitBackend && (
+                            <div className="text-[10px] text-amber-400 bg-gray-900/50 p-2 rounded border border-amber-900/50">
+                              <p className="mb-1">In the chart:</p>
+                              <ul className="list-disc list-inside space-y-1">
+                                <li><span className="text-teal-400">Dashed lines</span> = Ideal mathematical results</li>
+                                <li><span className="text-purple-400">Solid bars</span> = Noisy quantum simulation</li>
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      
+                      {useQiskitBackend && (
+                        <div className="mt-2 p-2 bg-quantum-900/50 rounded border border-quantum-700/50 text-[10px] text-quantum-accent">
+                          <p>Note: Make sure to run:</p>
+                          <p className="font-mono">pip install -r backend/requirements.txt</p>
+                          <p className="font-mono">python backend/main.py</p>
+                        </div>
+                      )}
+                    </div>
+                    {useQiskitBackend && (
+                      <div className="mt-4 space-y-2">
+                        <label className="block text-xs text-gray-400">Noise Level (Error Rate)</label>
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="range"
+                            min="0.000"
+                            max="0.1"
+                            step="0.001"
+                            value={noiseLevel}
+                            onChange={(e) => setNoiseLevel(parseFloat(e.target.value))}
+                            className="w-full h-2 bg-quantum-900 rounded-lg appearance-none cursor-pointer accent-quantum-accent"
+                          />
+                          <span className="font-mono text-sm w-12 text-right">{noiseLevel.toFixed(3)}</span>
+                        </div>
+                        <p className="text-[10px] text-gray-500">Adjust simulation noise (0.000 = Perfect, 0.1 = High Noise)</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -493,7 +1266,11 @@ const App: React.FC = () => {
 
           {/* Logic & Stats (Right) */}
           <div className="xl:col-span-9 space-y-6">
-            <ProbabilityChart history={history} optimalSteps={optimalIterations} />
+            <ProbabilityChart
+              history={history}
+              optimalSteps={optimalIterations}
+              useQiskitBackend={useQiskitBackend}
+            />
 
             <div className="bg-quantum-800/30 border border-quantum-700 rounded-xl p-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -540,8 +1317,10 @@ const App: React.FC = () => {
           </div>
 
         </div>
-      </main>
-    </div>
+          </main>
+        </div>
+      </Suspense>
+    </ErrorBoundary>
   );
 };
 

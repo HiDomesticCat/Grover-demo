@@ -1,54 +1,81 @@
-import { GoogleGenAI } from "@google/genai";
 import { StepHistory } from "../types";
 
-const getClient = () => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) {
-    console.warn("API_KEY not found in environment");
-    return null;
-  }
-  return new GoogleGenAI({ apiKey });
-};
+// Define a proper return type for better type safety
+interface ExplanationResponse {
+  explanation: string;
+  error?: string;
+}
 
+// Maximum number of retry attempts for API calls
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 1000; // ms
+
+/**
+ * Requests an AI explanation of the current quantum state from the backend
+ *
+ * @param stepIndex Current step in the algorithm
+ * @param numQubits Number of qubits in the system
+ * @param targetIndices Indices of target states
+ * @param currentProbability Current probability of target states
+ * @param history History of probabilities through algorithm steps
+ * @returns Promise containing explanation text
+ */
 export const explainQuantumState = async (
   stepIndex: number,
   numQubits: number,
   targetIndices: number[],
   currentProbability: number,
-  history: StepHistory[]
+  history: StepHistory[],
+  retryCount = 0
 ): Promise<string> => {
-  const client = getClient();
-  if (!client) return "API Key unavailable. Please configure your environment.";
-
-  const targetsFormatted = targetIndices
-    .map(idx => `${idx} (|${idx.toString(2).padStart(numQubits, '0')}⟩)`)
-    .join(', ');
-
-  const prompt = `
-    You are a Quantum Computing Tutor.
-    Explain the current status of a Grover's Algorithm simulation.
-    
-    Context:
-    - Number of Qubits: ${numQubits} (Total states: ${Math.pow(2, numQubits)})
-    - Target State Indices: ${targetsFormatted}
-    - Current Step: ${stepIndex}
-    - Combined Probability of Target States: ${(currentProbability * 100).toFixed(2)}%
-    - Iteration History (Target Probs): ${history.map(h => `${h.step}:${(h.probTarget*100).toFixed(1)}%`).join(', ')}
-
-    Task:
-    Provide a concise (max 3 sentences) explanation of what is happening mathematically (Constructive interference? Amplitude amplification?).
-    Mention if searching for multiple solutions affects the speed of convergence.
-    Do not use markdown formatting like bold or italics, just plain text.
-  `;
+  // Check if backend URL is available
+  // In Vite apps, environment variables should be accessed through process.env
+  const backendUrl = process.env.VITE_BACKEND_URL;
+  
+  if (!backendUrl) {
+    console.warn("Backend URL not configured. Please set VITE_BACKEND_URL in your environment.");
+    return "Backend URL not configured. Please check your environment settings.";
+  }
 
   try {
-    const response = await client.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
+    const response = await fetch(`${backendUrl}/explain`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        stepIndex,
+        numQubits,
+        targetIndices,
+        currentProbability,
+        history
+      })
     });
-    return response.text || "No explanation available.";
+
+    // Handle HTTP errors
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+    }
+
+    // Parse response
+    const data = await response.json() as ExplanationResponse;
+    
+    // Check for API key issues in the response
+    if (data.explanation?.includes('API Key not configured') || data.explanation?.includes('API key')) {
+      return "The AI service requires configuration on the backend. Please check the backend server logs and ensure the GEMINI_API_KEY environment variable is set.";
+    }
+    
+    return data.explanation || "No explanation available.";
   } catch (error) {
-    console.error("Gemini API Error:", error);
-    return "Unable to fetch AI explanation at this time.";
+    // Implement retry logic for transient errors
+    if (retryCount < MAX_RETRIES) {
+      console.warn(`AI explanation request failed, retrying (${retryCount + 1}/${MAX_RETRIES})...`);
+      await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+      return explainQuantumState(stepIndex, numQubits, targetIndices, currentProbability, history, retryCount + 1);
+    }
+    
+    console.error("AI explanation API Error:", error);
+    return "Unable to fetch AI explanation. Please check your backend connection or try again later.";
   }
 };
