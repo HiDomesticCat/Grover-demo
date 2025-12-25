@@ -66,76 +66,57 @@ const GeometricView: React.FC<GeometricViewProps> = ({ states, targetIndices }) 
 	const angleDegree = (angleRadian * 180) / Math.PI;
 	const finalAngle = Math.abs(angleDegree);
 	
-    const currentAngleRad = Math.atan2(yVal, xVal)
+	   const currentAngleRad = Math.atan2(yVal, xVal)
 	const initAngleRadius = Math.atan2(sinThetaDiv2, cosThetaDiv2);
 	const arcRadius = 30;
 	
-	/**
-	 * Generates SVG path for an arc between two angles
-	 * @param startRad Starting angle in radians
-	 * @param endRad Ending angle in radians
-	 * @param arcR Arc radius
-	 * @returns SVG path string for the arc or empty string if invalid
-	 */
-	const getAnglePath = (startRad: number, endRad: number, arcR: number): string => {
-		// Safety checks for valid input values
-		if (isNaN(startRad) || isNaN(endRad) || isNaN(arcR) || arcR <= 0) {
-			console.warn("Invalid arc parameters:", { startRad, endRad, arcR });
-			return "";
-		}
-
-		// Calculate starting point for arc (using correct SVG coordinate system)
+	const getAnglePath = (startRad: number, endRad: number, arcR: number) =>{
+		//starting point for arc
 		const startXArc = cx + arcR * Math.cos(startRad);
-		const startYArc = cy - arcR * Math.sin(startRad); // Y is inverted in SVG
-		
-		// Calculate ending point for arc
+		const startYArc = cy - arcR * Math.sin(startRad);
+		//ending point for arc
 		const endXArc = cx + arcR * Math.cos(endRad);
-		const endYArc = cy - arcR * Math.sin(endRad);
+		const endYArc = cy - arcR * Math.sin(endRad); //for SVG if Y is negative
 
-		// Calculate angle difference and normalize to [-π, π]
-		let angleDiff = endRad - startRad;
-		while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
-		while (angleDiff <= -Math.PI) angleDiff += 2 * Math.PI;
-		
-		// Skip rendering if angle is too small (avoids visual glitches)
-		const MIN_ANGLE = 0.001;
-		if (Math.abs(angleDiff) < MIN_ANGLE) {
-			return "";
+		// Ensure we handle angles correctly for sweep flag
+		// sweepFlag = 0 means clockwise, 1 means counter-clockwise
+		let sweepFlag = 0;
+		if ((startRad <= endRad && endRad - startRad <= Math.PI) ||
+		    (startRad > endRad && startRad - endRad > Math.PI)) {
+		  sweepFlag = 0; // Clockwise
+		} else {
+		  sweepFlag = 1; // Counter-clockwise
 		}
-
-		// SVG arc parameters
-		const largeArcFlag = Math.abs(angleDiff) > Math.PI ? 1 : 0;
-		const sweepFlag = angleDiff >= 0 ? 1 : 0;
+	       if (Math.abs(startRad - endRad) < 0.001) return ""; //no arc if angle too small
 		
-		// Create SVG arc path
-		return `M ${startXArc} ${startYArc} A ${arcR} ${arcR} 0 ${largeArcFlag} ${sweepFlag} ${endXArc} ${endYArc}`;
-	};
-	
-	// Calculate the arc path with proper bounds checking
-	const currentArcPath = Math.abs(currentAngleRad - initAngleRadius) > 0.001
-		? getAnglePath(initAngleRadius, currentAngleRad, arcRadius)
-		: ""; // No visible arc for very small angles
-    //[end]
+		/* inherit from Line 156: {`M ${cx + 30} ${cy} A 30 30 0 0 0 ${cx + 30 * Math.cos(-0.1)} ${cy + 30 * Math.sin(-0.1)}`}*/
+		return `M ${startXArc} ${startYArc} A ${arcR} ${arcR} 0 0 ${sweepFlag} ${endXArc} ${endYArc}`;
+		
+	}
+	//calculate the arc path
+	const currentArcPath = getAnglePath(initAngleRadius, currentAngleRad, arcRadius);//display the arc path
+	   //[end]
 
-    // Safety checks for coordinate calculation to avoid NaN values
-    // Validate important calculated values before rendering
-    const isValidCoordinate = (val: number): boolean => !isNaN(val) && isFinite(val);
-    const validStartCoords = isValidCoordinate(startX) && isValidCoordinate(startY);
-    const validVectorCoords = isValidCoordinate(vectorX) && isValidCoordinate(vectorY);
+	  // Safety checks for coordinate calculation to avoid NaN values
+	  // Validate important calculated values before rendering
+	  const isValidCoordinate = (val: number): boolean => !isNaN(val) && isFinite(val);
+	  const validStartCoords = isValidCoordinate(startX) && isValidCoordinate(startY);
+	  const validVectorCoords = isValidCoordinate(vectorX) && isValidCoordinate(vectorY);
+	  const validAngle = isValidCoordinate(finalAngle);
 
-    // Handle case when angle calculation fails
-    if (!validStartCoords || !validVectorCoords) {
-        return (
-            <div className="w-full bg-quantum-800/50 rounded-lg p-4 border border-quantum-700 flex flex-col">
-                <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">
-                    Geometric Interpretation
-                </h3>
-                <div className="flex-1 flex items-center justify-center">
-                    <p className="text-amber-500">Unable to calculate vector coordinates. Try selecting different target state(s).</p>
-                </div>
-            </div>
-        );
-    }
+	  // Handle case when angle calculation fails
+	  if (!validStartCoords || !validVectorCoords) {
+	      return (
+	          <div className="w-full bg-quantum-800/50 rounded-lg p-4 border border-quantum-700 flex flex-col">
+	              <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">
+	                  Geometric Interpretation
+	              </h3>
+	              <div className="flex-1 flex items-center justify-center">
+	                  <p className="text-amber-500">Unable to calculate vector coordinates. Try selecting different target state(s).</p>
+	              </div>
+	          </div>
+	      );
+	  }
 
     return (
         <div className="w-full bg-quantum-800/50 rounded-lg p-4 border border-quantum-700 flex flex-col">
@@ -163,15 +144,15 @@ const GeometricView: React.FC<GeometricViewProps> = ({ states, targetIndices }) 
                     <text x={cx} y={cy - axisLength - 10} textAnchor="middle" fill="#a855f7" fontSize="12" fontFamily="monospace">|w⟩ (Target)</text>
 					
 					{/*showing angle next to the  target label*/}
-					<text 
-						x={cx + 50} 
-						y={cy - axisLength - 10} 
-						textAnchor="start" 
+					<text
+						x={cx + 50}
+						y={cy - axisLength - 10}
+						textAnchor="start"
 						fill="#22d3ee"
-						fontSize="12" 
+						fontSize="12"
 						fontFamily="monospace"
 					>
-					{isValidCoordinate(finalAngle) ? `(${finalAngle.toFixed(2)}°)` : ""}
+					{validAngle ? `(${finalAngle.toFixed(2)}°)` : "(0.00°)"}
 					</text>
 
                     {/* Initial State Vector (Ghost) */}

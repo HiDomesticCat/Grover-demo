@@ -197,7 +197,7 @@ const App = () => {
     const checkBackend = async () => {
       if (useQiskitBackend) {
         try {
-          const backendUrl = `${process.env.VITE_BACKEND_URL || 'http://localhost:8000'}/`;
+          const backendUrl = `${(import.meta as any).env.VITE_BACKEND_URL || 'http://localhost:8000'}/`;
           const response = await fetch(backendUrl, {
             method: 'GET',
             headers: { 'Content-Type': 'application/json' }
@@ -632,7 +632,7 @@ const App = () => {
       }
         
       // Get backend URL from environment with fallback
-      const backendUrl = `${process.env.VITE_BACKEND_URL || 'http://localhost:8000'}/simulate`;
+      const backendUrl = `${(import.meta as any).env.VITE_BACKEND_URL || 'http://localhost:8000'}/simulate`;
       
       const response = await fetch(backendUrl, {
         method: 'POST',
@@ -825,9 +825,19 @@ const App = () => {
   // cd backend && pip install -r requirements.txt && python main.py
   
   // Pause the running simulation
-  const handlePause = () => {
-    setIsRunning(false);
-  };
+ const handlePause = () => {
+   setIsRunning(false);
+ };
+ 
+ // Resume the paused simulation
+ const handleResume = () => {
+   if (isRunning) return;
+   if (targetIndices.length === 0) {
+     setAppError("Please select at least one target state before running");
+     return;
+   }
+   setIsRunning(true);
+ };
 
   return (
     <ErrorBoundary>
@@ -1021,7 +1031,7 @@ const App = () => {
 
           {/* 3. Geometric View (Right) */}
           <div className="xl:col-span-4 h-[420px]">
-            <GeometricView states={states} targetIndices={targetIndices} />
+            <GeometricView states={useQiskitBackend ? idealStates : states} targetIndices={targetIndices} />
           </div>
         </div>
 

@@ -336,6 +336,22 @@ const StateChart: React.FC<StateChartProps> = ({
                   </YAxis>
                   <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255, 255, 255, 0.05)' }} />
                   <ReferenceLine y={0} stroke="#475569" strokeWidth={1} />
+                  {/* Mean Amplitude Line */}
+                  {showMean && meanAmplitude !== undefined && (
+                    <ReferenceLine
+                      y={meanAmplitude}
+                      stroke="#bd933aff"
+                      strokeDasharray="3 3"
+                      label={{
+                        position: 'insideLeft',
+                        value: 'Mean',
+                        fill: '#bd933aff',
+                        fontSize: 10,
+                        offset: 10,
+                        dy: -10,
+                      }}
+                    />
+                  )}
                   
                   {/* Ideal Data - Dashed Ghost Bars */}
                   {qiskitData && idealData && (
@@ -356,7 +372,6 @@ const StateChart: React.FC<StateChartProps> = ({
                       isAnimationActive={false}
                     />
                   )}
-                  
                   {/* Real/Qiskit Data - Solid Bars */}
                   <Bar
                     dataKey={qiskitData ? "qiskitProbability" : "amplitude"}
@@ -390,8 +405,12 @@ const StateChart: React.FC<StateChartProps> = ({
                       // Check if state is a target
                       const isTarget = targetIndices.includes(entry.index);
                       // When using Qiskit data, we show probabilities (0-1), otherwise amplitudes (-1 to 1)
-                      // Use purple for target states, blue for non-targets
-                      const fill = isTarget ? '#8b5cf6' : '#64748b';
+                      // For non-target states, use blue for positive and red for negative amplitudes
+                      const fill = isTarget
+                        ? '#8b5cf6'  // Purple for target states
+                        : entry.amplitude >= 0
+                          ? '#3b82f6'  // Blue for positive non-target amplitudes
+                          : '#ef4444'; // Red for negative non-target amplitudes
                       return (
                         <Cell
                           key={`cell-${index}`}

@@ -29,8 +29,8 @@ export const explainQuantumState = async (
   retryCount = 0
 ): Promise<string> => {
   // Check if backend URL is available
-  // In Vite apps, environment variables should be accessed through process.env
-  const backendUrl = process.env.VITE_BACKEND_URL;
+  // In Vite apps, environment variables should be accessed through (import.meta as any).env
+  const backendUrl = (import.meta as any).env.VITE_BACKEND_URL;
   
   if (!backendUrl) {
     console.warn("Backend URL not configured. Please set VITE_BACKEND_URL in your environment.");
