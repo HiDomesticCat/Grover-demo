@@ -8,6 +8,14 @@ from qiskit import QuantumCircuit, transpile
 from qiskit_aer import AerSimulator
 from qiskit_aer.noise import NoiseModel, depolarizing_error
 import json
+import logging
+
+logger = logging.getLogger("grover")
+
+# Resource limits to bound per-request work and prevent denial-of-service
+# from oversized or malicious inputs.
+MAX_QUBITS = 10
+MAX_ITERATIONS = 1000
 
 app = FastAPI()
 
@@ -106,12 +114,23 @@ async def simulate_quantum(request: SimulationRequest):
         iterations = request.iterations
         
         # Validate inputs
-        if num_qubits <= 0 or num_qubits > 10:  # Limiting to 10 qubits for performance
-            return {"error": "Number of qubits must be between 1 and 10"}
+        if num_qubits <= 0 or num_qubits > MAX_QUBITS:  # Limit qubits for performance
+            return {"error": f"Number of qubits must be between 1 and {MAX_QUBITS}"}
         
         dim = 2 ** num_qubits
+        # Bound the number of targets to the size of the state space.
+        if len(target_indices) > dim:
+            return {"error": f"Too many target indices (maximum {dim})"}
         if any(idx < 0 or idx >= dim for idx in target_indices):
             return {"error": f"Target indices must be between 0 and {dim-1}"}
+
+        # Bound iterations to avoid unbounded loops / oversized circuits (DoS).
+        if iterations < -1 or iterations > MAX_ITERATIONS:
+            return {"error": f"Iterations must be between -1 (auto) and {MAX_ITERATIONS}"}
+
+        # Noise level must be a finite probability in [0, 1].
+        if not math.isfinite(request.noise_value) or not (0.0 <= request.noise_value <= 1.0):
+            return {"error": "Noise value must be a number between 0 and 1"}
         
         # Calculate optimal iterations using Grover's formula: (π/4) * √(N/M)
         M = len(target_indices) if target_indices else 1  # Number of target states
@@ -212,8 +231,11 @@ async def simulate_quantum(request: SimulationRequest):
             "optimal_iterations": optimal_iterations
         }
         
-    except Exception as e:
-        return {"error": f"Simulation failed: {str(e)}"}
+    except Exception:
+        # Log the full error server-side; return a generic message so we don't
+        # leak internal details (stack traces, file paths) to the client.
+        logger.exception("Quantum simulation failed")
+        return {"error": "Simulation failed due to an internal error."}
 
 @app.get("/")
 async def root():
