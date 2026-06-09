@@ -1,9 +1,11 @@
 import path from 'path';
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, '.', '');
+// NOTE: Do not inject the Gemini API key into the client bundle. The key is a
+// backend-only secret; the frontend talks to the Python backend, which holds it.
+// Any value exposed here (or via a VITE_-prefixed env var) ships to every visitor.
+export default defineConfig(() => {
   return {
     server: {
       port: 3000,
@@ -13,10 +15,6 @@ export default defineConfig(({ mode }) => {
       ],
     },
     plugins: [react()],
-    define: {
-      '(import.meta as any).env.API_KEY': JSON.stringify(env.GEMINI_API_KEY || ""),
-      '(import.meta as any).env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY || "")
-    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

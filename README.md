@@ -60,13 +60,16 @@ Our visualizer shows each step in the process and explains the quantum mechanics
 
 1. Install frontend dependencies:
    `npm install`
-2. Create environment file:
+2. Create your local environment file from the template:
    ```bash
-   cp .env .env.local
+   cp .env.example .env.local
    ```
-3. Edit `.env.local` and add your Gemini API key:
+3. Edit `.env.local` and set the backend URL.
+   > **Security note:** Do **not** put your Gemini API key in the frontend env.
+   > Any `VITE_`-prefixed variable is inlined into the public browser bundle and
+   > would be exposed to every visitor. The Gemini key belongs only in the
+   > backend `.env` (see the Backend Setup section below).
    ```
-   VITE_GEMINI_API_KEY=your_actual_api_key_here
    VITE_BACKEND_URL=http://localhost:8000
    ```
 4. Run the frontend app:
@@ -95,7 +98,7 @@ To use the real Qiskit backend for quantum simulation:
 3. Set up environment variables:
    ```bash
    # Copy the template
-   cp ../.env .env
+   cp ../.env.example .env
    
    # Edit the .env file to add your API key and other settings
    # GEMINI_API_KEY=your_actual_api_key_here
