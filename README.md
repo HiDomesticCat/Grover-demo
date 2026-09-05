@@ -4,298 +4,126 @@
 # Grover's Algorithm Visualizer
 
 <p align="center">
-  <strong>Interactive visualization of quantum search with real quantum simulation capabilities</strong>
+  <strong>Interactive visualization of quantum search — with a noisy quantum simulator that runs entirely in your browser (Rust → WebAssembly)</strong>
 </p>
 
 <p align="center">
   <a href="#overview">Overview</a> •
   <a href="#features">Features</a> •
-  <a href="#installation">Installation</a> •
+  <a href="#quick-start">Quick start</a> •
   <a href="#usage">Usage</a> •
   <a href="#architecture">Architecture</a> •
-  <a href="#troubleshooting">Troubleshooting</a>
+  <a href="#the-simulator">The simulator</a> •
+  <a href="#deployment">Deployment</a>
 </p>
 
 </div>
 
 ## Overview
 
-This project provides an interactive visualization of Grover's Algorithm - a quantum search algorithm that provides quadratic speedup for unstructured database searches. The visualizer helps understand the quantum principles behind the algorithm, including superposition, phase shifts, and amplitude amplification.
+This project provides an interactive visualization of Grover's Algorithm — a quantum search algorithm that provides quadratic speedup for unstructured search. The visualizer shows superposition, phase inversion and amplitude amplification step by step, and can overlay a **noisy** simulation (depolarizing errors on every gate) against the ideal mathematics.
+
+Everything is a static site. There is no server: the noisy simulator is a small Rust crate compiled to WebAssembly (35 KB) that runs in the page. A 10-qubit, 25-iteration, 1024-shot run finishes in about half a second.
 
 ### What is Grover's Algorithm?
 
-Grover's algorithm is a quantum search algorithm that can find an element in an unsorted database in O(√N) time, compared to O(N) time required by classical algorithms. The key steps are:
+Grover's algorithm finds an element in an unsorted database in O(√N) time, compared to O(N) classically:
 
-1. **Initialization**: Create equal superposition of all states
-2. **Oracle**: Mark target states by inverting their phase
-3. **Diffusion**: Amplify amplitude of target states through reflection about average
-4. **Measurement**: Highest probability states are the search targets
-
-Our visualizer shows each step in the process and explains the quantum mechanics in an accessible way.
+1. **Initialization** — equal superposition of all states
+2. **Oracle** — mark target states by inverting their phase
+3. **Diffusion** — amplify target amplitudes by reflecting about the mean
+4. **Measurement** — the highest-probability states are the search targets
 
 ## Features
 
-- 🔍 **Interactive State Selection**: Choose target states to search for
-- 🔄 **Step-by-Step Visualization**: Watch amplitude amplification over iterations
-- 📊 **Multiple Views**: Amplitude chart, probability graph, and geometric representation
-- 🧠 **AI-powered Explanations**: Quantum state analysis from Gemini AI
-- 🧪 **Real Quantum Simulation**: Connect to Qiskit backend for true quantum noise simulation
-- 📱 **Responsive Design**: Works on desktop and tablets
+- 🔍 **Interactive state selection** — choose the target states to search for
+- 🔄 **Step-by-step visualization** — watch amplitude amplification over iterations
+- 📊 **Multiple views** — amplitude chart, probability graph, geometric representation
+- 🧪 **Noisy quantum simulation, in the browser** — quantum-trajectory depolarizing noise calibrated against Qiskit Aer; toggle it on and compare with the ideal curve
+- 🧮 **Optimal-iteration finder** — explore how ⌊(π/4)√(N/M)⌋ behaves for different N and M
+- 📱 **Responsive design** — desktop and tablets
 
-## Installation
-
-### Prerequisites
-- Node.js (for frontend)
-- Python 3.8+ (for backend)
-- Access to Qiskit (for quantum simulation)
-
-### Getting Your Gemini API Key (Optional)
-
-1. Go to [Google AI Studio](https://aistudio.google.com/)
-2. Create an account or sign in
-3. Create a new API key for the Gemini API
-4. Copy the API key for use in the environment setup
-
-### 1. Frontend Setup
-
-1. Install frontend dependencies:
-   `npm install`
-2. Create your local environment file from the template:
-   ```bash
-   cp .env.example .env.local
-   ```
-3. Edit `.env.local` and set the backend URL.
-   > **Security note:** Do **not** put your Gemini API key in the frontend env.
-   > Any `VITE_`-prefixed variable is inlined into the public browser bundle and
-   > would be exposed to every visitor. The Gemini key belongs only in the
-   > backend `.env` (see the Backend Setup section below).
-   ```
-   VITE_BACKEND_URL=http://localhost:8000
-   ```
-4. Run the frontend app:
-   ```bash
-   npm run dev
-   ```
-   
-5. Visit `http://localhost:5173` in your browser to access the application
-
-### 2. Python Backend Setup (Optional - for Real Quantum Simulation)
-
-To use the real Qiskit backend for quantum simulation:
-
-1. Navigate to the backend directory and create a Python virtual environment:
-   ```bash
-   cd backend
-   python3 -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-2. Install Python dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. Set up environment variables:
-   ```bash
-   # Copy the template
-   cp ../.env.example .env
-   
-   # Edit the .env file to add your API key and other settings
-   # GEMINI_API_KEY=your_actual_api_key_here
-   # CORS_ORIGINS=http://localhost:5173,http://localhost:3000,http://127.0.0.1:3000
-   # ALLOW_ALL_ORIGINS=true  # For development only, set to false in production
-   ```
-
-4. Run the backend server:
-   ```bash
-   python main.py
-   ```
-   
-   Alternatively, you can use the npm script from the main directory:
-   ```bash
-   npm run backend
-   ```
-
-5. In the frontend, enable "Use Real Qiskit Backend (Python)" toggle to use the real quantum simulation
-
-### One-Command Setup
-
-To run both frontend and backend together:
+## Quick start
 
 ```bash
-# Install all dependencies
 npm install
-npm run backend:install
+npm run dev          # http://localhost:3000
+```
 
-# Run both services
-npm run start
+That is the whole setup. The WebAssembly simulator is pre-built and committed in `wasm/pkg/`, so you do not need Rust to run or deploy the app.
+
+### Rebuilding the simulator (optional)
+
+Only needed if you change `wasm/src/lib.rs`.
+
+```bash
+rustup target add wasm32-unknown-unknown
+cargo install wasm-pack
+npm run test:wasm    # native unit tests
+npm run build:wasm   # → wasm/pkg  (commit the result)
 ```
 
 ## Usage
 
-### Basic Usage
+1. **Select state count** — number of qubits (or an arbitrary state count in custom mode)
+2. **Create superposition** — start from the uniform superposition
+3. **Select target states** — click bars to mark them
+4. **Run / Step** — continuous iterations or one at a time
+5. **Noise** — enable *Use quantum simulator* to run with depolarizing noise, and drag the noise slider. The ideal (noise-free) curve is drawn alongside for comparison.
 
-1. **Select State Count**: Choose the number of qubits (or states if in custom mode)
-2. **Create Superposition**: Start with an equal superposition of all states
-3. **Select Target States**: Click on the bars to select states you want to search for
-4. **Run Algorithm**: Use "Run" to see continuous iterations or "Step" for individual steps
-5. **Analyze Results**: See how probability concentrates in the target states over iterations
-6. **AI Explanation**: Request AI analysis of the current quantum state
-
-### Advanced Features
-
-- **Qiskit Backend**: Enable real quantum simulation with hardware noise models
-- **Optimal Iteration Finder**: Tool to find optimal iterations for different problem sizes
-- **Custom State Count**: Use non-power-of-2 state counts to explore generalized Grover search
+Try 8 qubits with noise 0.005: the multi-controlled gates in each iteration decompose into hundreds of CX gates, and the algorithm collapses to a uniform distribution — exactly the behaviour a real NISQ device (and Qiskit Aer) shows.
 
 ## Architecture
 
-### System Architecture
-
 ```
-┌────────────────────┐       ┌───────────────────────┐
-│   React Frontend   │◄─────►│    FastAPI Backend    │
-│   (TypeScript)     │       │    (Python/Qiskit)    │
-└────────────────────┘       └─────────────┬─────────┘
-         ▲                                 │
-         │                                 ▼
-┌────────┴────────┐           ┌───────────────────────┐
-│    Browser      │           │      Qiskit Aer       │
-│  Visualization  │           │  Quantum Simulator    │
-└─────────────────┘           └───────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│  Browser                                                 │
+│                                                          │
+│   React / TypeScript UI ──┬──► utils/quantum.ts          │
+│   (Vite, Recharts)        │    exact ideal evolution     │
+│                           │                              │
+│                           └──► wasm/pkg/grover_sim.wasm  │
+│                                noisy trajectory sim      │
+│                                (Rust, 35 KB)             │
+└──────────────────────────────────────────────────────────┘
 ```
 
-### Components
+- **`utils/quantum.ts`** — exact state-vector Grover in TypeScript, used for the ideal visualisation.
+- **`wasm/src/lib.rs`** — the noisy simulator (see below). Exposed to JS via `wasm-bindgen`; `services/wasmSimulator.ts` is the thin typed wrapper the app calls.
+- **No backend.** The former Python/Qiskit service has been retired; the WASM module implements the same `/simulate` contract (`{num_qubits, target_indices, iterations, noise_value}` → `{history, optimal_iterations}`), so the rest of the app did not change.
 
-- **Frontend**:
-  - React with TypeScript for UI components
-  - Recharts for data visualization
-  - Custom SVG rendering for geometric representation
-  - React Error Boundaries for fault tolerance
+## The simulator
 
-- **Backend**:
-  - FastAPI for REST API endpoints
-  - Qiskit for quantum circuit simulation
-  - Pydantic for request validation
-  - Gemini API integration for AI explanations
+`wasm/src/lib.rs` is deliberately small and readable — it is also meant as a worked example of numerical code in WebAssembly.
 
-- **Integration**:
-  - Environment variables for configuration
-  - JSON data exchange between frontend and backend
-  - CORS security for API access control
+- **Ideal evolution** is exact: the oracle is a diagonal phase flip on the marked indices and the diffusion operator is `2|s⟩⟨s| − I`, both applied in O(2ⁿ) without gate decomposition.
+- **Noise** uses the **quantum-trajectory** (Monte-Carlo wavefunction) method. Each shot is an independent state-vector trajectory; after every layer (initial Hadamards, each oracle, each diffusion) every qubit suffers a random Pauli error with probability `1 − (1 − ¾p)^g`, where `p` is the depolarizing parameter and `g` the number of noisy gates touching that qubit in the layer. `¾p` is the per-gate Pauli-error probability of Qiskit's `depolarizing_error(p)`.
+- **Gate counts** follow the structure of the original Qiskit circuit (X-conjugated `mcx` oracle, `H·X·mcx·X·H` diffusion), with `mcx` CX counts approximating Qiskit's ancilla-free decompositions (1, 6, 14, 36 for 1–4 controls, ≈2ᵏ beyond). A single calibration constant was fitted against recorded Aer runs; on the reference cases P(target) agrees with Aer to within its own 1024-shot sampling error.
+- **Sampling** mirrors the old backend: each step's distribution is estimated from 1024 virtual measurements (one per trajectory, non-collapsing). An `exact` flag averages |ψ|² instead.
+- **Deterministic** given a seed; no JS entropy or `rand` dependency.
 
-## Troubleshooting
+```ts
+import { runSimulation } from './services/wasmSimulator';
+const r = await runSimulation({ num_qubits: 4, target_indices: [3], noise_value: 0.02 });
+// r.history[step][basisIndex] — probability after `step` Grover iterations
+```
 
-### Common Issues
+## Deployment
 
-#### Backend Connection Problems
-
-- **Symptom**: "Failed to connect to backend" error in the UI
-- **Check**:
-  1. Is backend server running? Run `npm run backend`
-  2. Is backend URL correct in `.env`? Default: `http://localhost:8000`
-  3. Are CORS origins set correctly? Make sure frontend URL is in `CORS_ORIGINS`
-  4. For local development, set `ALLOW_ALL_ORIGINS=true` in the backend .env file
-  5. Restart the backend after changing CORS settings
-  6. Check the backend console for Python errors or 400 Bad Request messages
-  7. If you're accessing via IP address, ensure that IP is included in CORS_ORIGINS
-
-#### API Key Issues
-
-- **Symptom**: "API key not configured" when using AI features
-- **Check**:
-  1. Have you obtained a Gemini API key from [AI Studio](https://aistudio.google.com/)?
-  2. Is the API key correctly set in backend `.env` as `GEMINI_API_KEY=your_key`?
-  3. Check backend logs for API-related errors
-
-#### Qiskit Installation Problems
-
-- **Symptom**: Backend fails to start or quantum simulation errors
-- **Solutions**:
-  1. Use a Python virtual environment: `python -m venv venv && source venv/bin/activate`
-  2. Ensure Python version 3.8+ is used: `python --version`
-  3. Install dependencies with: `pip install -r requirements.txt`
-  4. For missing wheel errors, install development tools: `sudo apt-get install python3-dev`
-  5. Check if Qiskit is properly installed: `python -c "import qiskit; print(qiskit.__version__)"`
-  6. Ensure your version matches the requirements.txt specification
-
-#### React/Frontend Issues
-
-- **Symptom**: "White screen" or application doesn't load
-- **Solutions**:
-  1. Check browser console for JavaScript errors
-  2. Verify React version compatibility in package.json (using v18.2.0)
-  3. Run `npm install` to reinstall dependencies after package updates
-  4. Clear browser cache or try in incognito mode
-  5. Check network tab for failed API requests
-
-#### Iteration Calculation Discrepancy
-
-- **Symptom**: Backend and frontend calculate different "optimal iterations" values
-- **Explanation**: This is expected behavior. The backend and frontend use slightly different formulas:
-  - Frontend (TypeScript): Uses simulation to find peak probability with some heuristics
-  - Backend (Python): Uses the more precise formula `round(π/(4*theta) - 0.5)` where `theta = asin(sqrt(M/N))`
-- **Solutions**:
-  - Both calculations are mathematically valid - the backend is more precise
-  - The application will show the backend's calculation when using Qiskit
-  - For consistent results, always use the "Use Real Qiskit Backend" option
-
-#### Qiskit Backend Iteration Issues
-
-- **Symptom**: Simulation stops prematurely or doesn't run all iterations
-- **Solutions**:
-  1. Ensure the `iterations` parameter is being passed correctly (-1 for auto-calculate)
-  2. Check backend console for any error messages during simulation
-  3. Try reducing the number of qubits if system is resource-constrained
-  4. Verify the noise level is not too high (try 0.001-0.01 range)
-  5. Ensure CORS is properly configured if you get connection errors
-
-#### Browser Compatibility
-
-- **Symptom**: Visualization not rendering correctly
-- **Solutions**:
-  1. Use a modern browser (Chrome, Firefox, Edge, Safari)
-  2. Enable JavaScript and allow browser to render SVG content
-  3. Clear browser cache if issues persist
-
-### Getting Help
-
-If you encounter problems not covered here:
-
-1. Check the browser console for JavaScript errors
-2. Look at backend logs for Python errors
-3. Verify your environment configuration
-4. Ensure all dependencies are correctly installed
+The site is static. `.github/workflows/pages.yml` builds with `npm run build` and publishes `dist/` to **GitHub Pages** on every push to `main` (enable *Settings → Pages → Source: GitHub Actions* once). `vite.config.ts` uses a relative `base`, so the same build works on `https://<user>.github.io/<repo>/` and on a custom domain.
 
 ## Development
 
-### Available Scripts
-
 ```bash
-# Frontend Development
-npm run dev          # Start Vite development server
-npm run build        # Build for production
-npm run preview      # Preview production build
-
-# Backend Development
-npm run backend      # Start Python backend server
-npm run backend:install # Install backend dependencies
-
-# Combined Commands
-npm run start        # Run both frontend and backend
-npm run clean        # Remove build directories
-
-# Code Quality
-npm run lint         # Run ESLint
-npm run lint:fix     # Fix linting issues
-npm run format       # Run Prettier formatter
-npm run typecheck    # Check TypeScript types
-
-# Testing
-npm run test         # Run tests
-npm run test:watch   # Run tests in watch mode
+npm run dev          # Vite dev server
+npm run build        # production build → dist/
+npm run preview      # serve dist/ locally
+npm run build:wasm   # rebuild the Rust simulator → wasm/pkg
+npm run test:wasm    # cargo test
+npm run lint         # ESLint
+npm run format       # Prettier
 ```
 
 ## License
 
-This project is open source and available under the MIT License.
+MIT.

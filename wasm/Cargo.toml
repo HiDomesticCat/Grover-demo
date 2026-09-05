@@ -1,0 +1,23 @@
+[package]
+name = "grover-sim"
+version = "0.1.0"
+edition = "2021"
+description = "Grover's algorithm state-vector simulator with quantum-trajectory depolarizing noise, compiled to WebAssembly"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde-wasm-bindgen = "0.6"
+# Small, fast, seedable PRNG. We do not use `getrandom`/`rand` so the crate has
+# no JS-side entropy dependency and results are reproducible from a seed.
+# (xorshift/splitmix implemented inline in lib.rs — no crate needed.)
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

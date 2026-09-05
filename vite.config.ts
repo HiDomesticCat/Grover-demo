@@ -7,6 +7,9 @@ import react from '@vitejs/plugin-react';
 // Any value exposed here (or via a VITE_-prefixed env var) ships to every visitor.
 export default defineConfig(() => {
   return {
+    // Relative base: works on a custom domain *and* on a GitHub Pages
+    // project URL (https://<user>.github.io/<repo>/).
+    base: './',
     server: {
       port: 3000,
       host: '0.0.0.0',

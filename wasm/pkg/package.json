@@ -1,0 +1,17 @@
+{
+  "name": "grover-sim",
+  "type": "module",
+  "description": "Grover's algorithm state-vector simulator with quantum-trajectory depolarizing noise, compiled to WebAssembly",
+  "version": "0.1.0",
+  "license": "MIT",
+  "files": [
+    "grover_sim_bg.wasm",
+    "grover_sim.js",
+    "grover_sim.d.ts"
+  ],
+  "main": "grover_sim.js",
+  "types": "grover_sim.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
