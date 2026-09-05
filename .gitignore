@@ -32,3 +32,5 @@ __pycache__/
 .venv/
 venv/
 env/
+# Rust build artefacts (the built wasm/pkg IS committed so Pages needs no toolchain)
+wasm/target/

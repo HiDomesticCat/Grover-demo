@@ -5,11 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "vite build",
     "preview": "vite preview",
-    "backend": "cd backend && python main.py",
-    "backend:install": "cd backend && pip install -r requirements.txt",
-    "start": "concurrently \"npm run dev\" \"npm run backend\"",
+    "start": "vite",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext ts,tsx",
     "lint:fix": "eslint src --ext ts,tsx --fix",
@@ -17,8 +15,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "serve": "vite preview --port 3000",
-    "build:prod": "tsc && vite build --mode production",
-    "clean": "rm -rf dist node_modules"
+    "build:prod": "vite build --mode production",
+    "clean": "rm -rf dist node_modules",
+    "build:wasm": "wasm-pack build wasm --target web --release --out-dir pkg",
+    "build:all": "npm run build:wasm && npm run build",
+    "test:wasm": "cargo test --manifest-path wasm/Cargo.toml"
   },
   "dependencies": {
     "@google/genai": "^1.32.0",

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, Suspense } from 'react';
+import { initSimulator, runSimulation } from './services/wasmSimulator';
 
 // Augment the Window interface to include our global state storage
 declare global {
@@ -197,23 +198,15 @@ const App = () => {
     const checkBackend = async () => {
       if (useQiskitBackend) {
         try {
-          const backendUrl = `${(import.meta as any).env.VITE_BACKEND_URL || 'http://localhost:8000'}/`;
-          const response = await fetch(backendUrl, {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' }
-          });
-          
-          if (response.ok) {
-            setBackendConnected(true);
-            setAppError(null);
-          } else {
-            setBackendConnected(false);
-            setAppError('Backend server is running but returned an error. Check console for details.');
-          }
+          // The noisy simulator now runs in-browser (Rust → WebAssembly).
+          // "Connecting" just means loading the module once.
+          await initSimulator();
+          setBackendConnected(true);
+          setAppError(null);
         } catch (error) {
-          console.error('Backend connection error:', error);
+          console.error('WASM simulator failed to load:', error);
           setBackendConnected(false);
-          setAppError('Cannot connect to quantum backend server. Make sure it\'s running.');
+          setAppError('The in-browser quantum simulator failed to load. Reload the page to try again.');
         }
       }
     };
@@ -631,24 +624,15 @@ const App = () => {
         throw new Error(`Number of qubits (${numQubits}) exceeds maximum limit (10)`);
       }
         
-      // Get backend URL from environment with fallback
-      const backendUrl = `${(import.meta as any).env.VITE_BACKEND_URL || 'http://localhost:8000'}/simulate`;
-      
-      const response = await fetch(backendUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          num_qubits: numQubits,
-          target_indices: targetIndices,
-          noise_value: noiseLevel,
-          iterations: optimalIterations // Use -1 to tell backend to use the calculated optimal iterations
-                         // Backend will ensure proper number of iterations for specific cases
-        })
+      // Run the noisy simulation in-browser (Rust → WebAssembly). Same
+      // request/response contract as the former Python /simulate endpoint.
+      const data = await runSimulation({
+        num_qubits: numQubits,
+        target_indices: targetIndices,
+        noise_value: noiseLevel,
+        iterations: optimalIterations, // -1 ⇒ simulator picks ⌊(π/4)√(N/M)⌋
+        shots: 1024,
       });
-      
-      const data = await response.json();
       
       if (data.success) {
         // Store the history data - backend always returns data.history as number[][]
@@ -792,7 +776,7 @@ const App = () => {
           setAppError(data.error || "Unknown error during quantum simulation");
         }
         
-        console.error('Qiskit simulation failed:', data.error);
+        console.error('Simulation failed:', data.error);
         setQiskitData(null);
         setIsRunning(false);
         
@@ -805,13 +789,13 @@ const App = () => {
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error('Failed to connect to Qiskit backend:', error);
+      console.error('Simulator error:', error);
       
       // More detailed error message with troubleshooting steps
-      if (errorMessage.includes('NetworkError') || errorMessage.includes('Failed to fetch')) {
-        setAppError(`Cannot connect to the backend server. Please ensure the Python server is running with: python backend/main.py`);
+      if (errorMessage.includes('WebAssembly') || errorMessage.includes('wasm')) {
+        setAppError(`The in-browser simulator (WebAssembly) failed to load: ${errorMessage}. Reload the page; if it persists, your browser may block WebAssembly.`);
       } else {
-        setAppError(`Backend error: ${errorMessage}. Check if the server is running and properly configured.`);
+        setAppError(`Simulation error: ${errorMessage}`);
       }
       
       setQiskitData(null);
@@ -821,8 +805,8 @@ const App = () => {
     }
   };
   
-  // Developer Note: To use the real Qiskit backend, make sure to run:
-  // cd backend && pip install -r requirements.txt && python main.py
+  // Developer Note: the noisy simulator is wasm/src/lib.rs (Rust → WebAssembly).
+  // Rebuild with `npm run build:wasm` after editing it.
   
   // Pause the running simulation
  const handlePause = () => {
@@ -879,14 +863,13 @@ const App = () => {
                 {/* Troubleshooting tips based on error type */}
                 {typeof appError === 'string' && (
                   <>
-                    {(appError.includes('backend') || appError.includes('Backend')) ? (
+                    {(appError.includes('WebAssembly') || appError.includes('simulator')) ? (
                       <div className="mt-2 p-2 bg-red-900/50 border border-red-700/50 rounded text-xs text-red-200">
                         <strong className="block mb-1">Troubleshooting:</strong>
                         <ul className="list-disc list-inside space-y-1">
-                          <li>Ensure the Python backend is running: <code className="bg-black/30 px-1 rounded">python backend/main.py</code></li>
-                          <li>Check if the BACKEND_URL in your .env file is correct</li>
-                          <li>Verify that all required Python packages are installed</li>
-                          <li>Try with fewer qubits if system resources are limited</li>
+                          <li>Reload the page so the WebAssembly simulator is fetched again</li>
+                          <li>Make sure your browser allows WebAssembly (all modern browsers do)</li>
+                          <li>Try with fewer qubits if the device is very slow</li>
                         </ul>
                       </div>
                     ) : appError.includes('simulation') ? (
@@ -1207,9 +1190,9 @@ const App = () => {
                             setUseQiskitBackend(e.target.checked);
                           }}
                           className="rounded bg-quantum-900 border-quantum-700 text-quantum-accent focus:ring-quantum-accent"
-                          aria-label="Use real Qiskit backend"
+                          aria-label="Use noisy quantum simulator (WebAssembly)"
                         />
-                        <span>Use Real Qiskit Backend (Python)</span>
+                        <span>Use Noisy Quantum Simulator (WASM)</span>
                       </label>
                       
                       {/* Backend Status Indicator */}
@@ -1224,8 +1207,8 @@ const App = () => {
                               backendConnected === null ? 'text-gray-500' :
                               backendConnected ? 'text-green-500' : 'text-red-500'
                             }>
-                              {backendConnected === null ? 'Checking connection...' :
-                               backendConnected ? 'Backend connected' : 'Backend not available'}
+                              {backendConnected === null ? 'Loading simulator...' :
+                               backendConnected ? 'WASM simulator ready' : 'Simulator unavailable'}
                             </span>
                           </div>
                           
@@ -1244,9 +1227,7 @@ const App = () => {
                       
                       {useQiskitBackend && (
                         <div className="mt-2 p-2 bg-quantum-900/50 rounded border border-quantum-700/50 text-[10px] text-quantum-accent">
-                          <p>Note: Make sure to run:</p>
-                          <p className="font-mono">pip install -r backend/requirements.txt</p>
-                          <p className="font-mono">python backend/main.py</p>
+                          <p>Runs in your browser: Rust → WebAssembly quantum-trajectory simulator with per-gate depolarizing noise (calibrated against Qiskit Aer). No server involved.</p>
                         </div>
                       )}
                     </div>
